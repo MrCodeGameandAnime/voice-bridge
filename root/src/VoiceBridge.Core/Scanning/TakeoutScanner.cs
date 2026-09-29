@@ -79,7 +79,7 @@ public sealed class TakeoutScanner
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(sourcePath, filePath).Replace('\\', '/');
-                state.AddFile(relativePath);
+                state.AddFile(relativePath, new FileInfo(filePath).Length);
             }
         }
         catch (OperationCanceledException)
@@ -127,7 +127,7 @@ public sealed class TakeoutScanner
                 }
 
                 ValidateEntryChecksum(entry, buffer, cancellationToken);
-                state.AddFile(relativePath);
+                state.AddFile(relativePath, entry.Length);
             }
         }
         catch (OperationCanceledException)
@@ -219,6 +219,7 @@ public sealed class TakeoutScanner
 
         public bool VoiceContentFound { get; private set; }
         public long FilesScanned { get; private set; }
+        public long TotalBytes { get; private set; }
         public long CandidateMessagePages { get; private set; }
         public long CandidateImageVideoMediaFiles { get; private set; }
         public long CandidateAudioMediaFiles { get; private set; }
@@ -235,9 +236,10 @@ public sealed class TakeoutScanner
             }
         }
 
-        public void AddFile(string relativePath)
+        public void AddFile(string relativePath, long sizeBytes)
         {
             FilesScanned++;
+            TotalBytes += sizeBytes;
             var normalizedPath = NormalizeArchivePath(relativePath);
             if (!_seenPaths.Add(normalizedPath))
             {
@@ -326,7 +328,8 @@ public sealed class TakeoutScanner
                 CandidateCallEventPages,
                 OtherVoiceFiles,
                 UnknownFiles,
-                warnings);
+                warnings,
+                TotalBytes);
         }
 
         private void ClassifyHtml(string relativePath, string fileName)

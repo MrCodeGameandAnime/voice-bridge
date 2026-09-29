@@ -4,15 +4,16 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Windowing;
+using VoiceBridge.Core.Domain;
 using VoiceBridge.Core.Importing;
 using VoiceBridge.Core.Scanning;
 using VoiceBridge.Desktop.Diagnostics;
+using VoiceBridge.Desktop.Presentation;
 using VoiceBridge.Export;
 using VoiceBridge.Storage;
-using Windows.Storage.Pickers;
 using Windows.Graphics;
+using Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace VoiceBridge.Desktop;
@@ -20,12 +21,19 @@ namespace VoiceBridge.Desktop;
 public sealed partial class MainWindow : Window
 {
     private static readonly JsonSerializerOptions ReportJsonOptions = new() { WriteIndented = true };
+    private static readonly HashSet<string> MediaTypes = new(StringComparer.OrdinalIgnoreCase) { "audio", "image", "video" };
     private readonly DispatcherQueue _dispatcherQueue;
+    private readonly List<WorkspaceEntry> _exportIssues = [];
     private string? _sourcePath;
     private string? _outputDirectory;
+    private string? _databasePath;
     private string? _archiveIndexPath;
+    private string? _csvExportDirectory;
     private ImportReport? _importReport;
     private ScanReport? _scanReport;
+    private ExportSummary? _htmlExportSummary;
+    private ExportSummary? _csvExportSummary;
+    private WorkspaceData? _workspaceData;
     private CancellationTokenSource? _operationCancellation;
 
     public MainWindow()
@@ -36,9 +44,12 @@ public sealed partial class MainWindow : Window
         VersionAttributionText.Text = $"404 Builds · VoiceBridge {version}";
         var windowHandle = WindowNative.GetWindowHandle(this);
         var appWindow = AppWindow.GetFromWindowId(Win32Interop.GetWindowIdFromWindow(windowHandle));
-        appWindow.Resize(new SizeInt32(1040, 880));
+        appWindow.Resize(new SizeInt32(1320, 900));
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread()
             ?? throw new InvalidOperationException("The UI dispatcher is unavailable.");
+        WorkspaceNavigation.SelectedItem = OverviewNavigationItem;
+        ShowWorkspaceView("Overview");
+        RefreshWorkspace();
     }
 
     private async void SelectZip_Click(object sender, RoutedEventArgs e)
@@ -89,12 +100,11 @@ public sealed partial class MainWindow : Window
             var folder = await picker.PickSingleFolderAsync();
             if (folder is not null)
             {
-                _outputDirectory = folder.Path;
-                OutputPathText.Text = FormatPathForDisplay(folder.Path);
-                ToolTipService.SetToolTip(OutputPathText, folder.Path);
+                _outputDirectory = Path.GetFullPath(folder.Path);
+                ClearImportedState();
                 UpdateCrashLogDirectory();
-                ResultsCard.Visibility = Visibility.Collapsed;
-                RefreshControls();
+                SetStatus("Destination selected. VoiceBridge will write generated files only after you choose Build local archive.");
+                RefreshWorkspace();
             }
         }
         catch (Exception exception)
@@ -107,19 +117,16 @@ public sealed partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(_sourcePath))
         {
-            SetStatus("Choose a ZIP file or extracted Takeout folder first.", isError: true);
+            SetStatus("Select a ZIP file or extracted Takeout folder first.", isError: true);
             return;
         }
 
-        _scanReport = null;
-        RefreshControls();
-        using var cancellation = BeginOperation("Scanning the Takeout source…");
-        ScanCard.Visibility = Visibility.Collapsed;
-        ResultsCard.Visibility = Visibility.Collapsed;
+        using var cancellation = BeginOperation("Scanning and verifying the source…");
         try
         {
+            var sourcePath = _sourcePath;
             var scanResult = await Task.Run(
-                () => new TakeoutScanner().Scan(_sourcePath, cancellation.Token),
+                () => new TakeoutScanner().Scan(sourcePath, cancellation.Token),
                 cancellation.Token);
             if (!scanResult.IsSuccess)
             {
@@ -127,21 +134,10 @@ public sealed partial class MainWindow : Window
             }
 
             _scanReport = scanResult.Value!;
-            ScanSummaryText.Text = $"Files scanned: {_scanReport.FilesScanned:N0}\n"
-                + $"Message pages: {_scanReport.CandidateMessagePages:N0}\n"
-                + $"Call/event pages: {_scanReport.CandidateCallEventPages:N0}\n"
-                + $"Voicemail pages: {_scanReport.CandidateVoicemailPages:N0}\n"
-                + $"Image/video media files: {_scanReport.CandidateImageVideoMediaFiles:N0}\n"
-                + $"Audio media files: {_scanReport.CandidateAudioMediaFiles:N0}\n"
-                + $"Other Voice files: {_scanReport.OtherVoiceFiles:N0}\n"
-                + $"Unclassified files: {_scanReport.UnknownFiles:N0}";
-            ScanWarningText.Text = _scanReport.Warnings.Count == 0
-                ? "No scan warnings."
-                : $"{_scanReport.Warnings.Count:N0} scan warning(s). Unclassified files and warnings remain visible in this summary.";
-            ScanCard.Visibility = Visibility.Visible;
             SetStatus(_scanReport.VoiceContentFound
-                ? "Scan complete. Review the summary before starting the import."
-                : "Scan complete. No Google Voice content was identified; the source is still available for review.");
+                ? $"Scan complete. {_scanReport.FilesScanned:N0} files inventoried; choose Export when you are ready to build the local archive."
+                : "Scan complete. No Google Voice content was identified; the inventory and warnings remain available for review.");
+            RefreshWorkspace();
         }
         catch (OperationCanceledException)
         {
@@ -157,11 +153,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void StartImport_Click(object sender, RoutedEventArgs e)
+    private async void BuildArchive_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_sourcePath) || string.IsNullOrWhiteSpace(_outputDirectory) || _scanReport is null)
+        if (string.IsNullOrWhiteSpace(_sourcePath) || _scanReport is null || string.IsNullOrWhiteSpace(_outputDirectory))
         {
-            SetStatus("Choose a source and destination, then scan before importing.", isError: true);
+            SetStatus("Select and scan a source, then choose a destination in Export.", isError: true);
             return;
         }
 
@@ -170,12 +166,22 @@ public sealed partial class MainWindow : Window
         var databasePath = Path.Combine(outputDirectory, "voicebridge.db");
         var reportPath = Path.Combine(outputDirectory, "import-report.json");
         var archiveDirectory = Path.Combine(outputDirectory, "archive");
+        _databasePath = databasePath;
+        _archiveIndexPath = null;
+        _htmlExportSummary = null;
+        _csvExportSummary = null;
+        _csvExportDirectory = null;
+        _exportIssues.Clear();
+        _importReport = null;
+        _workspaceData = null;
+
         try
         {
             SourceOutputPathValidator.EnsureOutputOutsideDirectorySource(sourcePath, outputDirectory);
             if (File.Exists(databasePath) || File.Exists(reportPath) || Directory.Exists(archiveDirectory))
             {
-                SetStatus("This destination already contains VoiceBridge output. Choose an empty destination folder so existing files are preserved.", isError: true);
+                SetStatus("This destination already contains VoiceBridge output. Choose a destination without voicebridge.db, import-report.json, or archive so existing files are preserved.", isError: true);
+                RefreshWorkspace();
                 return;
             }
         }
@@ -185,69 +191,71 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _archiveIndexPath = null;
-        _importReport = null;
-        OpenArchiveButton.IsEnabled = false;
-        ViewIssuesButton.IsEnabled = false;
-        using var cancellation = BeginOperation("Preparing the import…");
-        ResultsCard.Visibility = Visibility.Collapsed;
+        var cancellation = BeginOperation("Preparing the local import…");
         try
         {
             Directory.CreateDirectory(outputDirectory);
             var service = new TakeoutImportService(new SqliteTakeoutImportStoreFactory());
             service.ProgressChanged += (_, progress) => _dispatcherQueue.TryEnqueue(() => UpdateImportProgress(progress));
 
-            SetStatus("Importing messages, calls, voicemails, and source evidence…");
-            var report = await Task.Run(
+            SetStatus("Importing messages, calls, voicemails, media references, and source evidence…");
+            _importReport = await Task.Run(
                 () => service.ImportAsync(sourcePath, databasePath, cancellation.Token),
                 cancellation.Token);
-            _importReport = report;
-            ViewIssuesButton.IsEnabled = true;
-            ResultsSummaryText.Text = FormatImportSummary(report);
-            await WriteImportReportAsync(reportPath, report, CancellationToken.None);
+            await WriteImportReportAsync(reportPath, _importReport, cancellation.Token);
+
+            SetStatus("Loading the imported records into the workspace…");
+            _workspaceData = await Task.Run(
+                () => ReadWorkspaceData(databasePath, cancellation.Token),
+                cancellation.Token);
+            RefreshWorkspace();
 
             SetStatus("Building the offline HTML archive…");
-            await Task.Run(
+            _htmlExportSummary = await Task.Run(
                 () => TakeoutArchiveExporter.ExportHtmlAsync(databasePath, archiveDirectory, cancellation.Token),
                 cancellation.Token);
-
             _archiveIndexPath = Path.Combine(archiveDirectory, "index.html");
-            OpenArchiveButton.IsEnabled = File.Exists(_archiveIndexPath);
-            ResultStatusText.Text = "The offline archive is ready. Nothing was uploaded.";
-            ResultsCard.Visibility = Visibility.Visible;
-            SetStatus("Import and archive export complete.");
+            _exportIssues.AddRange(ReadUnavailableMediaIssues(Path.Combine(archiveDirectory, "export-report.json"), "HTML export"));
+            SetStatus("Import complete. The offline archive is ready on this PC; nothing was uploaded.");
         }
         catch (OperationCanceledException)
         {
-            ResultStatusText.Text = "Operation canceled. Any completed database and import report remain in the destination.";
-            ResultsSummaryText.Text = _importReport is null
-                ? "The import did not finish. No imported records are available."
-                : FormatImportSummary(_importReport);
-            ResultsCard.Visibility = Visibility.Visible;
-            ViewIssuesButton.IsEnabled = _importReport is not null;
-            OpenArchiveButton.IsEnabled = _archiveIndexPath is not null && File.Exists(_archiveIndexPath);
-            SetStatus("Operation canceled.");
+            SetStatus("Operation canceled. Any completed database, report, or archive files remain in the selected destination.");
+            await LoadCompletedImportIfAvailableAsync(databasePath);
         }
         catch (Exception exception)
         {
-            ResultStatusText.Text = "The operation stopped before all outputs were ready. Existing files were preserved.";
-            ResultsSummaryText.Text = _importReport is null
-                ? "No completed import report is available."
-                : FormatImportSummary(_importReport);
-            ResultsCard.Visibility = Visibility.Visible;
-            ViewIssuesButton.IsEnabled = _importReport is not null;
-            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't complete the import. Check the source and destination, then try again."), isError: true);
+            _exportIssues.Add(CreateOperationIssue("Build operation stopped", exception));
+            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't complete the build. Check the source and destination, then try again."), isError: true);
+            await LoadCompletedImportIfAvailableAsync(databasePath);
         }
         finally
         {
             EndOperation(cancellation);
-            RefreshControls();
+            RefreshWorkspace();
+        }
+    }
+
+    private async Task LoadCompletedImportIfAvailableAsync(string databasePath)
+    {
+        if (_importReport is null || !File.Exists(databasePath) || _workspaceData is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            _workspaceData = await Task.Run(() => ReadWorkspaceData(databasePath, CancellationToken.None));
+        }
+        catch (Exception exception)
+        {
+            _exportIssues.Add(CreateOperationIssue("Workspace data could not be loaded", exception));
         }
     }
 
     private void UpdateImportProgress(ImportProgress progress)
     {
-        ProgressStatusText.Text = progress.Message;
+        StatusText.Text = progress.Message;
         if (progress.Stage == ImportProgressStage.ProcessingMessages && progress.Total > 0)
         {
             OperationProgressBar.IsIndeterminate = false;
@@ -259,7 +267,48 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static async Task WriteImportReportAsync(string reportPath, ImportReport report, CancellationToken cancellationToken)
+    private async void ExportCsv_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_databasePath) || string.IsNullOrWhiteSpace(_outputDirectory))
+        {
+            SetStatus("Build the local archive before creating a CSV export.", isError: true);
+            return;
+        }
+
+        var csvDirectory = Path.Combine(_outputDirectory, "csv-export");
+        if (Directory.Exists(csvDirectory) || File.Exists(csvDirectory))
+        {
+            SetStatus("The csv-export folder already exists. Choose a new destination in Export to preserve the existing files.", isError: true);
+            return;
+        }
+
+        var cancellation = BeginOperation("Creating relational CSV tables…");
+        try
+        {
+            _csvExportDirectory = csvDirectory;
+            _csvExportSummary = await Task.Run(
+                () => TakeoutArchiveExporter.ExportCsvAsync(_databasePath, csvDirectory, cancellation.Token),
+                cancellation.Token);
+            _exportIssues.AddRange(ReadUnavailableMediaIssues(Path.Combine(csvDirectory, "export-report.json"), "CSV export"));
+            SetStatus("CSV export complete. Source media was not copied or modified.");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("CSV export canceled. Any completed files remain in the selected destination.");
+        }
+        catch (Exception exception)
+        {
+            _exportIssues.Add(CreateOperationIssue("CSV export stopped", exception));
+            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't create the CSV export."), isError: true);
+        }
+        finally
+        {
+            EndOperation(cancellation);
+            RefreshWorkspace();
+        }
+    }
+
+    private async Task WriteImportReportAsync(string reportPath, ImportReport report, CancellationToken cancellationToken)
     {
         await using var reportStream = new FileStream(
             reportPath,
@@ -271,38 +320,621 @@ public sealed partial class MainWindow : Window
         await JsonSerializer.SerializeAsync(reportStream, report, ReportJsonOptions, cancellationToken);
     }
 
-    private static string FormatImportSummary(ImportReport report) =>
-        $"Messages: {report.RecordsParsed.Messages:N0}\n"
-        + $"Conversations: {report.RecordsParsed.Conversations:N0}\n"
-        + $"Calls: {report.RecordsParsed.Calls:N0}\n"
-        + $"Voicemails: {report.RecordsParsed.Voicemails:N0}\n"
-        + $"Media references: {report.RecordsParsed.MediaReferences:N0} ({report.RecordsParsed.MatchedMediaReferences:N0} matched, {report.RecordsParsed.UnresolvedMediaReferences:N0} unresolved)\n"
-        + $"Warnings: {report.Warnings:N0}    Errors: {report.Errors:N0}";
-
-    private async void ViewIssues_Click(object sender, RoutedEventArgs e)
+    private void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (_importReport is null)
+        var selectedItem = args.SelectedItemContainer;
+        if (selectedItem?.Tag is string viewName)
+        {
+            ShowWorkspaceView(viewName);
+        }
+    }
+
+    private void OpenExport_Click(object sender, RoutedEventArgs e) => WorkspaceNavigation.SelectedItem = ExportNavigationItem;
+
+    private void ShowWorkspaceView(string viewName)
+    {
+        OverviewView.Visibility = viewName == "Overview" ? Visibility.Visible : Visibility.Collapsed;
+        MessagesView.Visibility = viewName == "Messages" ? Visibility.Visible : Visibility.Collapsed;
+        CallsView.Visibility = viewName == "Calls" ? Visibility.Visible : Visibility.Collapsed;
+        VoicemailsView.Visibility = viewName == "Voicemails" ? Visibility.Visible : Visibility.Collapsed;
+        MediaView.Visibility = viewName == "Media" ? Visibility.Visible : Visibility.Collapsed;
+        IssuesView.Visibility = viewName == "Issues" ? Visibility.Visible : Visibility.Collapsed;
+        ExportView.Visibility = viewName == "Export" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RefreshWorkspace()
+    {
+        RefreshSidebar();
+        RefreshOverview();
+        RefreshDataViews();
+        RefreshIssuesView();
+        RefreshExportView();
+        RefreshControls();
+    }
+
+    private void RefreshSidebar()
+    {
+        if (_sourcePath is null)
+        {
+            SidebarSourceText.Text = "○ No archive loaded";
+            ToolTipService.SetToolTip(SidebarSourceText, "No archive loaded");
+        }
+        else
+        {
+            SidebarSourceText.Text = $"● {Path.GetFileName(Path.TrimEndingDirectorySeparator(_sourcePath))}";
+            ToolTipService.SetToolTip(SidebarSourceText, _sourcePath);
+        }
+
+        var presentation = GetWorkspaceStatusPresentation();
+        MessagesCountText.Text = presentation.MessagesValue;
+        CallsCountText.Text = presentation.CallsValue;
+        VoicemailsCountText.Text = presentation.VoicemailsValue;
+        MediaCountText.Text = presentation.MediaValue;
+        IssuesNavigationLabelText.Text = presentation.IssuesNavigationLabel;
+        IssuesCountText.Text = presentation.IssuesCount;
+
+        var parsedState = _importReport is not null
+            ? $"✓ Imported · {_importReport.RecordsParsed.Messages:N0} messages"
+            : _scanReport is not null
+                ? $"✓ Scanned · {_scanReport.FilesScanned:N0} files"
+                : "Not scanned";
+        var issueState = presentation.IssuesHealthSummary;
+        var sourceState = GetSourceVerificationText();
+        var exportState = _htmlExportSummary is not null
+            ? "✓ HTML archive built"
+            : _importReport is not null
+                ? "Imported · archive not built"
+                : "Archive not built";
+
+        HealthParsedText.Text = parsedState;
+        HealthIssuesText.Text = issueState;
+        HealthSourceText.Text = sourceState;
+        HealthExportText.Text = exportState;
+    }
+
+    private void RefreshOverview()
+    {
+        if (_sourcePath is null)
+        {
+            OverviewTitleText.Text = "Open your Google Voice Takeout";
+            OverviewSubtitleText.Text = "Select the original ZIP or extracted folder. VoiceBridge will inspect it without modifying it.";
+            OverviewSourcePathText.Text = "No archive selected";
+            OverviewSourceSummaryText.Text = "Choose a Google Voice Takeout ZIP or extracted folder to inspect it locally.";
+            ToolTipService.SetToolTip(OverviewSourcePathText, "No archive selected");
+            ScanSummaryText.Text = "Scanning checks the archive and classifies its files. It does not require an output destination.";
+        }
+        else
+        {
+            OverviewTitleText.Text = _scanReport is null ? "Review your Google Voice Takeout" : "Archive overview";
+            OverviewSubtitleText.Text = "The original source stays read-only. Scan it here, then choose a destination under Export when you are ready to build.";
+            OverviewSourcePathText.Text = Path.GetFileName(Path.TrimEndingDirectorySeparator(_sourcePath));
+            ToolTipService.SetToolTip(OverviewSourcePathText, _sourcePath);
+            OverviewSourceSummaryText.Text = FormatSourceSummary();
+            ScanSummaryText.Text = _scanReport is null
+                ? "Source selected. Scan it to inventory files and verify ZIP member checksums; no output destination is needed."
+                : FormatScanSummary(_scanReport);
+        }
+
+        ScanButton.Content = _scanReport is null ? "Scan archive" : "Scan again";
+
+        var presentation = GetWorkspaceStatusPresentation();
+        OverviewMessagesText.Text = $"Messages  {presentation.MessagesValue}";
+        OverviewCallsText.Text = $"Calls  {presentation.CallsValue}";
+        OverviewVoicemailsText.Text = $"Voicemails  {presentation.VoicemailsValue}";
+        OverviewMediaText.Text = $"Media  {presentation.MediaValue}";
+        OverviewHealthParsedText.Text = _importReport is not null
+            ? $"✓ Imported {_importReport.RecordsParsed.Messages:N0} messages"
+            : _scanReport is not null
+                ? $"✓ Scan complete · {_scanReport.FilesScanned:N0} files"
+                : "Not scanned";
+        OverviewHealthIssuesText.Text = presentation.IssuesHealthSummary;
+        OverviewHealthSourceText.Text = GetSourceVerificationText();
+        OverviewHealthExportText.Text = _htmlExportSummary is not null
+            ? $"✓ Offline HTML archive ready · {_htmlExportSummary.MediaCopied:N0} media copied, {_htmlExportSummary.MediaUnavailable:N0} unavailable"
+            : _importReport is not null
+                ? "Imported data is ready; HTML archive has not finished building."
+                : "Archive not built";
+        NextActionText.Text = _sourcePath is null
+            ? "Select a Takeout ZIP or extracted folder, then scan it."
+            : _scanReport is null
+                ? "Scan the selected source. You do not need to choose an output folder yet."
+                : _importReport is null
+                    ? "Review the inventory, then open Export to choose where the local database and offline archive will be built."
+                    : _htmlExportSummary is not null
+                        ? "Inspect messages, calls, voicemails, media, and issues from the sidebar, or create the optional CSV export."
+                        : "Imported records are available to inspect. Review the build status in Export.";
+        OpenExportButton.IsEnabled = _scanReport is not null;
+    }
+
+    private string FormatSourceSummary()
+    {
+        if (_sourcePath is null)
+        {
+            return "Choose a source to see its type, size, file count, and verification state.";
+        }
+
+        var kind = Directory.Exists(_sourcePath) ? "Extracted folder" : "ZIP archive";
+        if (_scanReport is null)
+        {
+            try
+            {
+                var size = File.Exists(_sourcePath) ? new FileInfo(_sourcePath).Length : (long?)null;
+                return size is null ? $"{kind} · not scanned" : $"{kind} · {FormatBytes(size.Value)} on disk · not scanned";
+            }
+            catch (IOException)
+            {
+                return $"{kind} · size unavailable · not scanned";
+            }
+        }
+
+        if (_scanReport.SourceKind == SourceKind.ZipArchive)
+        {
+            var archiveSize = File.Exists(_sourcePath) ? new FileInfo(_sourcePath).Length : 0;
+            return $"ZIP archive · {_scanReport.FilesScanned:N0} files · {FormatBytes(archiveSize)} on disk · about {FormatBytes(_scanReport.TotalBytes)} of file contents";
+        }
+
+        return $"Extracted folder · {_scanReport.FilesScanned:N0} files · about {FormatBytes(_scanReport.TotalBytes)} total file contents";
+    }
+
+    private static string FormatScanSummary(ScanReport report) =>
+        $"{(report.SourceKind == SourceKind.ZipArchive ? "ZIP archive" : "Extracted folder")} · {report.FilesScanned:N0} files · about {FormatBytes(report.TotalBytes)} of file contents\n"
+        + $"Message pages: {report.CandidateMessagePages:N0} · Call/event pages: {report.CandidateCallEventPages:N0} · Voicemail pages: {report.CandidateVoicemailPages:N0}\n"
+        + $"Image/video media files: {report.CandidateImageVideoMediaFiles:N0} · Audio media files: {report.CandidateAudioMediaFiles:N0} · Other Voice files: {report.OtherVoiceFiles:N0} · Unclassified: {report.UnknownFiles:N0}\n"
+        + (report.Warnings.Count == 0 ? "No scan warnings." : $"{report.Warnings.Count:N0} scan warning(s). Exact warning records are listed in Issues.");
+
+    private string GetSourceVerificationText()
+    {
+        if (_scanReport is null)
+        {
+            return "Source not verified";
+        }
+
+        if (_scanReport.SourceKind == SourceKind.ZipArchive)
+        {
+            return _importReport?.InputIdentity.SourceSha256 is { Length: > 0 }
+                ? "✓ ZIP member CRC checks passed · archive SHA-256 fingerprint recorded"
+                : "✓ ZIP member CRC checks passed";
+        }
+
+        return "Folder scan completed · no container checksum available";
+    }
+
+    private void RefreshDataViews()
+    {
+        var data = _workspaceData;
+        MessagesViewSummaryText.Text = data is null
+            ? "Build the local archive in Export to inspect parsed messages."
+            : $"{data.Messages.Count:N0} message records. Source timestamps, direction evidence, attachments, and row provenance are retained.";
+        CallsViewSummaryText.Text = data is null
+            ? "Build the local archive in Export to inspect parsed call records."
+            : $"{data.Calls.Count:N0} call records. Event labels, contacts, durations, media references, and source paths remain as imported.";
+        VoicemailsViewSummaryText.Text = data is null
+            ? "Build the local archive in Export to inspect transcripts and media references."
+            : $"{data.Voicemails.Count:N0} voicemail records. Transcript and audio fields remain optional and are shown with their recorded match status.";
+        MediaViewSummaryText.Text = data is null
+            ? "Build the local archive in Export to inspect source media and attachment matches."
+            : $"{data.MediaFileCount:N0} source media files and {data.MediaReferences.Count:N0} recorded media references. Matched and unresolved references remain visible.";
+
+        SetItems(MessagesListView, data?.Messages, "No message records were imported.", "Messages appear here after a successful import.");
+        SetItems(CallsListView, data?.Calls, "No call records were imported.", "Calls appear here after a successful import.");
+        SetItems(VoicemailsListView, data?.Voicemails, "No voicemail records were imported.", "Voicemails appear here after a successful import.");
+        SetItems(MediaListView, data?.MediaReferences, "No media files or references were imported.", "Source media and recorded references appear here after a successful import.");
+    }
+
+    private static void SetItems(ListView listView, IReadOnlyList<WorkspaceEntry>? items, string emptyMessage, string unavailableMessage)
+    {
+        listView.ItemsSource = items is null
+            ? [new WorkspaceEntry("Not imported", string.Empty, unavailableMessage, string.Empty)]
+            : items.Count == 0
+                ? [new WorkspaceEntry("No records", string.Empty, emptyMessage, string.Empty)]
+                : items;
+    }
+
+    private void RefreshIssuesView()
+    {
+        var entries = new List<WorkspaceEntry>();
+        if (_scanReport is not null)
+        {
+            entries.AddRange(_scanReport.Warnings.Select(warning => new WorkspaceEntry(
+                $"Scan warning · {warning.Code}",
+                warning.RelativePath is null ? "Scan" : $"Source: {warning.RelativePath}",
+                warning.Message,
+                string.Empty)));
+        }
+
+        if (_workspaceData is not null)
+        {
+            entries.AddRange(_workspaceData.ImportIssues);
+        }
+        else if (_importReport is not null)
+        {
+            entries.AddRange(_importReport.Issues.Select((issue, index) => new WorkspaceEntry(
+                $"Import {issue.Severity} · {issue.Code}",
+                $"Issue {index + 1:N0}",
+                issue.Message,
+                FormatProvenance(issue.SourceRelativePath, issue.SourceRowIndex))));
+        }
+
+        entries.AddRange(_exportIssues);
+        IssuesViewSummaryText.Text = entries.Count == 0
+            ? _scanReport is null
+                ? "Scan warnings and import/export findings will remain visible here."
+                : "No scan, import, or export issues were recorded."
+            : $"{entries.Count:N0} scan, import, or export finding(s). Original codes, messages, paths, rows, and media reasons are preserved.";
+        IssuesListView.ItemsSource = entries.Count == 0
+            ? [new WorkspaceEntry("No findings", string.Empty, "No scan warnings or import/export issues have been recorded.", string.Empty)]
+            : entries;
+    }
+
+    private void RefreshExportView()
+    {
+        ExportSourceSummaryText.Text = _scanReport is null || _sourcePath is null
+            ? "Select and scan a Takeout source in Overview first."
+            : $"Source: {_sourcePath}\n{FormatSourceSummary()}\nVerification: {GetSourceVerificationText()}";
+        OutputPathText.Text = _outputDirectory is null ? "No destination selected" : FormatPathForDisplay(_outputDirectory);
+        ToolTipService.SetToolTip(OutputPathText, _outputDirectory ?? "No destination selected");
+
+        if (_htmlExportSummary is not null && _outputDirectory is not null)
+        {
+            BuildResultText.Text = $"Database: {Path.Combine(_outputDirectory, "voicebridge.db")}\n"
+                + $"Import report: {Path.Combine(_outputDirectory, "import-report.json")}\n"
+                + $"Offline HTML archive: {Path.Combine(_outputDirectory, "archive")}\n"
+                + $"{_htmlExportSummary.Conversations:N0} conversations · {_htmlExportSummary.Messages:N0} messages · {_htmlExportSummary.Calls:N0} calls · {_htmlExportSummary.Voicemails:N0} voicemails · {_htmlExportSummary.MediaCopied:N0} media copied · {_htmlExportSummary.MediaUnavailable:N0} unavailable";
+        }
+        else if (_importReport is not null && _outputDirectory is not null)
+        {
+            BuildResultText.Text = $"Import completed; the HTML archive did not finish. Database: {Path.Combine(_outputDirectory, "voicebridge.db")} · Import report: {Path.Combine(_outputDirectory, "import-report.json")}";
+        }
+        else if (_scanReport is not null)
+        {
+            BuildResultText.Text = "No files are written during scanning. Choose a destination and build when ready.";
+        }
+        else
+        {
+            BuildResultText.Text = "Select and scan a source before building.";
+        }
+
+        CsvResultText.Text = _csvExportSummary is not null && _csvExportDirectory is not null
+            ? $"CSV tables and export-report.json created in {_csvExportDirectory} · {_csvExportSummary.MediaUnavailable:N0} unavailable media references."
+            : _databasePath is null || _outputDirectory is null
+                ? "Build the local archive first."
+                : $"Will create {Path.Combine(_outputDirectory, "csv-export")} with relational CSV tables and export-report.json.";
+    }
+
+    private void RefreshControls()
+    {
+        var busy = _operationCancellation is not null;
+        var imported = _workspaceData is not null;
+        MessagesNavigationItem.IsEnabled = imported;
+        CallsNavigationItem.IsEnabled = imported;
+        VoicemailsNavigationItem.IsEnabled = imported;
+        MediaNavigationItem.IsEnabled = imported;
+        IssuesNavigationItem.Visibility = _scanReport is null ? Visibility.Collapsed : Visibility.Visible;
+        ExportNavigationItem.Visibility = _scanReport is null ? Visibility.Collapsed : Visibility.Visible;
+        SelectZipButton.IsEnabled = !busy;
+        SelectFolderButton.IsEnabled = !busy;
+        ScanButton.IsEnabled = !busy && _sourcePath is not null;
+        SelectOutputButton.IsEnabled = !busy && _scanReport is not null;
+        BuildArchiveButton.IsEnabled = !busy && _scanReport is not null && _outputDirectory is not null && _importReport is null;
+        ExportCsvButton.IsEnabled = !busy && _databasePath is not null && _outputDirectory is not null
+            && !Directory.Exists(Path.Combine(_outputDirectory, "csv-export"))
+            && !File.Exists(Path.Combine(_outputDirectory, "csv-export"));
+        OpenArchiveButton.IsEnabled = !busy && _archiveIndexPath is not null && File.Exists(_archiveIndexPath);
+        OpenOutputButton.IsEnabled = !busy && _outputDirectory is not null && Directory.Exists(_outputDirectory);
+        OpenCsvOutputButton.IsEnabled = !busy && _csvExportDirectory is not null && Directory.Exists(_csvExportDirectory);
+    }
+
+    private WorkspaceStatusPresentation GetWorkspaceStatusPresentation() =>
+        WorkspaceStatusPresentation.Create(_scanReport, _importReport, _exportIssues.Count);
+
+    private void SetSource(string sourcePath)
+    {
+        _sourcePath = Path.GetFullPath(sourcePath);
+        WorkspaceNavigation.SelectedItem = OverviewNavigationItem;
+        _scanReport = null;
+        _outputDirectory = null;
+        ClearImportedState();
+        UpdateCrashLogDirectory();
+        SetStatus("Source selected. Scan it now; choose a destination later from Export.");
+        RefreshWorkspace();
+    }
+
+    private void ClearImportedState()
+    {
+        _databasePath = null;
+        _archiveIndexPath = null;
+        _csvExportDirectory = null;
+        _importReport = null;
+        _htmlExportSummary = null;
+        _csvExportSummary = null;
+        _workspaceData = null;
+        _exportIssues.Clear();
+    }
+
+    private void SetStatus(string message, bool isError = false)
+    {
+        StatusText.Text = (isError ? "Issue: " : string.Empty) + message;
+    }
+
+    private void UpdateCrashLogDirectory()
+    {
+        if (Application.Current is App app)
+        {
+            app.CrashLogDirectory = CrashLogPolicy.Resolve(_sourcePath, _outputDirectory);
+        }
+    }
+
+    private static WorkspaceData ReadWorkspaceData(string databasePath, CancellationToken cancellationToken)
+    {
+        using var reader = new SqliteArchiveReader(databasePath);
+        var messages = new List<WorkspaceEntry>();
+        var calls = new List<WorkspaceEntry>();
+        var voicemails = new List<WorkspaceEntry>();
+        var mediaReferences = new List<WorkspaceEntry>();
+        var matchedFileIds = new HashSet<long>();
+
+        foreach (var message in reader.ReadMessages())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            messages.Add(CreateMessageEntry(message));
+            foreach (var attachment in message.Attachments)
+            {
+                if (attachment.MatchedSourceFileId is long matchedId)
+                {
+                    matchedFileIds.Add(matchedId);
+                }
+
+                mediaReferences.Add(new WorkspaceEntry(
+                    "Message attachment reference",
+                    $"Message ID: {message.Id} · Media type: {ShowRaw(attachment.MediaType)} · Match: {(attachment.MatchedSourceFileId is null ? "unresolved" : "matched")}",
+                    $"Raw reference: {ShowRaw(attachment.RawReference)}",
+                    $"Message source: {FormatProvenance(message.SourceRelativePath, message.SourceRowIndex)}\nMatched source path: {ShowRaw(attachment.MatchedRelativePath)}"));
+            }
+        }
+
+        foreach (var call in reader.ReadCalls())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            calls.Add(CreateCallEntry(call));
+            foreach (var reference in call.MediaReferences)
+            {
+                if (reference.MatchedSourceFileId is long matchedId)
+                {
+                    matchedFileIds.Add(matchedId);
+                }
+
+                mediaReferences.Add(CreateMediaReferenceEntry("Call media reference", call.SourceRelativePath, reference));
+            }
+        }
+
+        foreach (var voicemail in reader.ReadVoicemails())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            voicemails.Add(CreateVoicemailEntry(voicemail));
+            if (voicemail.MatchedAudioSourceFileId is long audioId)
+            {
+                matchedFileIds.Add(audioId);
+            }
+
+            if (voicemail.AudioReference is not null || voicemail.AudioMatchStatus != "missing_reference")
+            {
+                mediaReferences.Add(new WorkspaceEntry(
+                    "Voicemail audio reference",
+                    $"Voicemail ID: {voicemail.Id} · Match status: {voicemail.AudioMatchStatus}",
+                    $"Raw reference: {ShowRaw(voicemail.AudioReference)}",
+                    $"Source: {voicemail.SourceRelativePath}\nMatched source path: {ShowRaw(voicemail.MatchedAudioRelativePath)}"));
+            }
+
+            foreach (var reference in voicemail.MediaReferences)
+            {
+                if (reference.MatchedSourceFileId is long matchedId)
+                {
+                    matchedFileIds.Add(matchedId);
+                }
+
+                mediaReferences.Add(CreateMediaReferenceEntry("Voicemail media reference", voicemail.SourceRelativePath, reference));
+            }
+        }
+
+        var mediaFiles = reader.ReadSourceFiles()
+            .Where(file => file.MediaType is not null && MediaTypes.Contains(file.MediaType))
+            .ToArray();
+        foreach (var file in mediaFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            mediaReferences.Add(new WorkspaceEntry(
+                "Source media file",
+                $"Type: {ShowRaw(file.MediaType)} · Size: {FormatBytes(file.SizeBytes)} · {(matchedFileIds.Contains(file.Id) ? "Matched to a recorded reference" : "No matched reference in imported records")}",
+                file.RelativePath,
+                file.ContentSha256 is null ? $"Source file ID: {file.Id}" : $"Source file ID: {file.Id} · SHA-256: {file.ContentSha256}"));
+        }
+
+        var issues = reader.ReadImportIssues()
+            .Select(issue => new WorkspaceEntry(
+                issue.Severity + " · " + issue.Code,
+                $"Issue ID: {issue.Id}",
+                issue.Message,
+                FormatProvenance(issue.SourceRelativePath, issue.SourceRowIndex)))
+            .ToArray();
+
+        return new WorkspaceData(messages, calls, voicemails, mediaReferences, mediaFiles.LongLength, issues);
+    }
+
+    private static WorkspaceEntry CreateMessageEntry(StoredMessage message)
+    {
+        var sender = string.Join(" · ", new[] { message.SenderDisplayName, message.SenderPhoneNumber }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        var attachmentDetails = message.Attachments.Count == 0
+            ? "No attachment references recorded."
+            : "Attachment references:\n" + string.Join("\n", message.Attachments.Select(attachment =>
+                $"{ShowRaw(attachment.RawReference)} · {ShowRaw(attachment.MediaType)} · {(attachment.MatchedSourceFileId is null ? "unresolved" : $"matched: {ShowRaw(attachment.MatchedRelativePath)}")}"));
+        return new WorkspaceEntry(
+            string.IsNullOrWhiteSpace(sender) ? "Sender not recorded" : sender,
+            $"Raw timestamp: {ShowRaw(message.RawTimestamp)} · Parsed UTC: {ShowRaw(message.TimestampUtc)} · Direction: {(message.Direction is null ? "not determined" : message.Direction)}",
+            message.Body is null ? "Message body not recorded." : message.Body,
+            $"Source: {FormatProvenance(message.SourceRelativePath, message.SourceRowIndex)}\n{attachmentDetails}");
+    }
+
+    private static WorkspaceEntry CreateCallEntry(StoredCallRecord call)
+    {
+        var metadata = $"Raw event: {ShowRaw(call.RawEventType)} · Raw timestamp: {ShowRaw(call.RawTimestamp)} · Parsed UTC: {ShowRaw(call.TimestampUtc)}\n"
+            + $"Contact: {ShowRaw(call.RawContact)} · Filename contact: {ShowRaw(call.RawFilenameContact)} · Contact source: {ShowRaw(call.RawContactSource)}\n"
+            + $"Phone: {ShowRaw(call.RawPhoneNumber)} · Duration: {ShowRaw(call.DurationDisplayText)} · Duration seconds: {ShowRaw(call.DurationSeconds?.ToString(System.Globalization.CultureInfo.InvariantCulture))}";
+        var media = call.MediaReferences.Count == 0
+            ? "No call media references recorded."
+            : "Media references:\n" + string.Join("\n", call.MediaReferences.Select(FormatMediaReference));
+        return new WorkspaceEntry($"Call record {call.Id}", metadata, media, $"Source: {call.SourceRelativePath}");
+    }
+
+    private static WorkspaceEntry CreateVoicemailEntry(StoredVoicemail voicemail)
+    {
+        var metadata = $"Raw timestamp: {ShowRaw(voicemail.RawTimestamp)} · Parsed UTC: {ShowRaw(voicemail.TimestampUtc)}\n"
+            + $"Contact: {ShowRaw(voicemail.RawContact)} · Filename contact: {ShowRaw(voicemail.RawFilenameContact)} · Contact source: {ShowRaw(voicemail.RawContactSource)}\n"
+            + $"Phone: {ShowRaw(voicemail.RawPhoneNumber)} · Duration: {ShowRaw(voicemail.DurationDisplayText)} · Duration seconds: {ShowRaw(voicemail.DurationSeconds?.ToString(System.Globalization.CultureInfo.InvariantCulture))}";
+        var audio = $"Audio match status: {voicemail.AudioMatchStatus}\nAudio reference: {ShowRaw(voicemail.AudioReference)}\nMatched audio path: {ShowRaw(voicemail.MatchedAudioRelativePath)}";
+        var media = voicemail.MediaReferences.Count == 0
+            ? audio
+            : audio + "\nOther media references:\n" + string.Join("\n", voicemail.MediaReferences.Select(FormatMediaReference));
+        return new WorkspaceEntry(
+            $"Voicemail record {voicemail.Id}",
+            metadata,
+            voicemail.Transcript is null ? "Transcript not recorded." : $"Transcript: {voicemail.Transcript}",
+            $"Source: {voicemail.SourceRelativePath}\n{media}");
+    }
+
+    private static WorkspaceEntry CreateMediaReferenceEntry(string title, string sourcePath, StoredMediaReference reference) => new(
+        title,
+        $"Match status: {reference.MatchStatus} · Media type: {ShowRaw(reference.MediaType)} · Matched path: {ShowRaw(reference.MatchedRelativePath)}",
+        $"Raw reference: {reference.RawReference}",
+        $"Source: {sourcePath}");
+
+    private static string FormatMediaReference(StoredMediaReference reference) =>
+        $"{reference.RawReference} · {reference.MatchStatus} · type {ShowRaw(reference.MediaType)} · matched path {ShowRaw(reference.MatchedRelativePath)}";
+
+    private static IReadOnlyList<WorkspaceEntry> ReadUnavailableMediaIssues(string reportPath, string exportName)
+    {
+        if (!File.Exists(reportPath))
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
+        if (!document.RootElement.TryGetProperty("unavailableMedia", out var unavailable) || unavailable.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return unavailable.EnumerateArray().Select(item =>
+        {
+            var id = item.TryGetProperty("SourceFileId", out var upperId) ? upperId.GetInt64()
+                : item.TryGetProperty("sourceFileId", out var lowerId) ? lowerId.GetInt64() : 0;
+            var path = item.TryGetProperty("RelativePath", out var upperPath) ? upperPath.GetString()
+                : item.TryGetProperty("relativePath", out var lowerPath) ? lowerPath.GetString() : null;
+            var reason = item.TryGetProperty("Reason", out var upperReason) ? upperReason.GetString()
+                : item.TryGetProperty("reason", out var lowerReason) ? lowerReason.GetString() : null;
+            return new WorkspaceEntry(
+                $"{exportName} · unavailable media · source file {id}",
+                "Export warning",
+                $"Path: {ShowRaw(path)}\nReason: {ShowRaw(reason)}",
+                $"Exact details are retained in {reportPath}");
+        }).ToArray();
+    }
+
+    private static WorkspaceEntry CreateOperationIssue(string title, Exception exception) => new(
+        title,
+        exception.GetType().FullName ?? exception.GetType().Name,
+        exception.Message,
+        exception.StackTrace ?? string.Empty);
+
+    private static string FormatProvenance(string? sourcePath, int? rowIndex) =>
+        $"Source: {ShowRaw(sourcePath)} · Row: {(rowIndex is null ? "not recorded" : rowIndex.Value.ToString("N0"))}";
+
+    private static string ShowRaw(string? value) => value switch
+    {
+        null => "(not recorded)",
+        "" => "(empty)",
+        _ => value
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["bytes", "KiB", "MiB", "GiB", "TiB"];
+        double size = bytes;
+        var unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return unit == 0 ? $"{bytes:N0} bytes" : $"{size:N1} {units[unit]}";
+    }
+
+    private async void OpenArchive_Click(object sender, RoutedEventArgs e) => await OpenPathAsync(_archiveIndexPath, "The offline archive isn't available yet.");
+    private async void OpenOutput_Click(object sender, RoutedEventArgs e) => await OpenPathAsync(_outputDirectory, "Choose a destination folder first.");
+    private async void OpenCsvOutput_Click(object sender, RoutedEventArgs e) => await OpenPathAsync(_csvExportDirectory, "The CSV export folder isn't available yet.");
+
+    private async Task OpenPathAsync(string? path, string missingMessage)
+    {
+        if (string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path)))
+        {
+            SetStatus(missingMessage, isError: true);
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            await ShowMessageAsync(GetUserMessage(exception, "Windows couldn't open that location."));
+        }
+    }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        if (_operationCancellation is null)
         {
             return;
         }
 
-        var issueText = _importReport.Issues.Count == 0
-            ? "No import issues were recorded."
-            : string.Join(Environment.NewLine + Environment.NewLine, _importReport.Issues.Select(FormatIssue));
-        var content = new ScrollViewer
+        CancelButton.IsEnabled = false;
+        SetStatus("Canceling safely…");
+        _operationCancellation.Cancel();
+    }
+
+    private CancellationTokenSource BeginOperation(string initialStatus)
+    {
+        _operationCancellation = new CancellationTokenSource();
+        StatusText.Text = initialStatus;
+        OperationProgressBar.Visibility = Visibility.Visible;
+        OperationProgressBar.IsIndeterminate = true;
+        OperationProgressBar.Value = 0;
+        CancelButton.Visibility = Visibility.Visible;
+        CancelButton.IsEnabled = true;
+        RefreshControls();
+        return _operationCancellation;
+    }
+
+    private void EndOperation(CancellationTokenSource cancellation)
+    {
+        if (ReferenceEquals(_operationCancellation, cancellation))
         {
-            MaxHeight = 480,
-            Content = new TextBlock
-            {
-                Text = issueText,
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true
-            }
-        };
+            _operationCancellation = null;
+        }
+
+        cancellation.Dispose();
+        OperationProgressBar.Visibility = Visibility.Collapsed;
+        CancelButton.Visibility = Visibility.Collapsed;
+        RefreshWorkspace();
+    }
+
+    private async Task ShowMessageAsync(string message)
+    {
         var dialog = new ContentDialog
         {
-            Title = $"Import issues ({_importReport.Issues.Count:N0})",
-            Content = content,
+            Title = "VoiceBridge",
+            Content = message,
             CloseButtonText = "Close",
             XamlRoot = RootGrid.XamlRoot
         };
@@ -315,7 +947,7 @@ public sealed partial class MainWindow : Window
         var about = new StackPanel { Spacing = 10 };
         about.Children.Add(new TextBlock { Text = $"VoiceBridge {version}", FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         about.Children.Add(new TextBlock { Text = "Built by 404 Builds.", TextWrapping = TextWrapping.Wrap });
-        about.Children.Add(new TextBlock { Text = "VoiceBridge reads the Google Voice Takeout you select and creates a local database, report, and offline HTML archive in your chosen output folder.", TextWrapping = TextWrapping.Wrap });
+        about.Children.Add(new TextBlock { Text = "VoiceBridge reads the Google Voice Takeout you select and creates a local database, import report, and offline HTML archive in the destination you choose.", TextWrapping = TextWrapping.Wrap });
         about.Children.Add(new TextBlock { Text = "No account is required. VoiceBridge does not add telemetry or upload your Takeout.", TextWrapping = TextWrapping.Wrap });
         await ShowDialogAsync("About VoiceBridge", about);
     }
@@ -345,110 +977,6 @@ public sealed partial class MainWindow : Window
         await dialog.ShowAsync();
     }
 
-    private static string FormatIssue(ImportIssueRecord issue)
-    {
-        var location = issue.SourceRelativePath is null ? string.Empty : $"\nSource: {issue.SourceRelativePath}";
-        var row = issue.SourceRowIndex is null ? string.Empty : $"\nRow: {issue.SourceRowIndex.Value:N0}";
-        return $"{issue.Severity}: {issue.Code}\n{issue.Message}{location}{row}";
-    }
-
-    private async void OpenArchive_Click(object sender, RoutedEventArgs e)
-    {
-        await OpenPathAsync(_archiveIndexPath, "The offline archive isn't available yet.");
-    }
-
-    private async void OpenOutput_Click(object sender, RoutedEventArgs e)
-    {
-        await OpenPathAsync(_outputDirectory, "Choose an output folder first.");
-    }
-
-    private async Task OpenPathAsync(string? path, string missingMessage)
-    {
-        if (string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path)))
-        {
-            SetStatus(missingMessage, isError: true);
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
-        }
-        catch (Exception exception)
-        {
-            await ShowMessageAsync(GetUserMessage(exception, "Windows couldn't open that location."));
-        }
-    }
-
-    private void Cancel_Click(object sender, RoutedEventArgs e)
-    {
-        if (_operationCancellation is null)
-        {
-            return;
-        }
-
-        CancelButton.IsEnabled = false;
-        SetStatus("Canceling safely…");
-        ProgressStatusText.Text = "Canceling safely…";
-        _operationCancellation.Cancel();
-    }
-
-    private CancellationTokenSource BeginOperation(string initialStatus)
-    {
-        _operationCancellation = new CancellationTokenSource();
-        ProgressCard.Visibility = Visibility.Visible;
-        ProgressStatusText.Text = initialStatus;
-        OperationProgressBar.IsIndeterminate = true;
-        OperationProgressBar.Value = 0;
-        CancelButton.IsEnabled = true;
-        RefreshControls();
-        return _operationCancellation;
-    }
-
-    private void EndOperation(CancellationTokenSource cancellation)
-    {
-        if (ReferenceEquals(_operationCancellation, cancellation))
-        {
-            _operationCancellation = null;
-        }
-
-        cancellation.Dispose();
-        ProgressCard.Visibility = Visibility.Collapsed;
-        RefreshControls();
-    }
-
-    private void SetSource(string sourcePath)
-    {
-        _sourcePath = sourcePath;
-        SourcePathBox.Text = FormatPathForDisplay(sourcePath);
-        ToolTipService.SetToolTip(SourcePathBox, sourcePath);
-        UpdateCrashLogDirectory();
-        _scanReport = null;
-        ScanCard.Visibility = Visibility.Collapsed;
-        ResultsCard.Visibility = Visibility.Collapsed;
-        SetStatus("Source selected. Choose a destination, then scan the Takeout.");
-        RefreshControls();
-    }
-
-    private void SetStatus(string message, bool isError = false)
-    {
-        StatusText.Text = message;
-        StatusText.Foreground = new SolidColorBrush(isError ? Colors.DarkRed : Colors.DarkSlateGray);
-        if (_operationCancellation is not null)
-        {
-            ProgressStatusText.Text = message;
-            ProgressStatusText.Foreground = new SolidColorBrush(isError ? Colors.DarkRed : Colors.DarkSlateGray);
-        }
-    }
-
-    private void UpdateCrashLogDirectory()
-    {
-        if (Application.Current is App app)
-        {
-            app.CrashLogDirectory = CrashLogPolicy.Resolve(_sourcePath, _outputDirectory);
-        }
-    }
-
     private static string FormatPathForDisplay(string path)
     {
         var fullPath = Path.GetFullPath(path);
@@ -468,39 +996,26 @@ public sealed partial class MainWindow : Window
             : $"…{Path.DirectorySeparatorChar}{parent}{Path.DirectorySeparatorChar}{leaf}";
     }
 
-    private async Task ShowMessageAsync(string message)
-    {
-        var dialog = new ContentDialog
-        {
-            Title = "VoiceBridge",
-            Content = message,
-            CloseButtonText = "Close",
-            XamlRoot = RootGrid.XamlRoot
-        };
-        await dialog.ShowAsync();
-    }
-
-    private void RefreshControls()
-    {
-        var busy = _operationCancellation is not null;
-        SelectZipButton.IsEnabled = !busy;
-        SelectFolderButton.IsEnabled = !busy;
-        SelectOutputButton.IsEnabled = !busy;
-        ScanButton.IsEnabled = !busy && !string.IsNullOrWhiteSpace(_sourcePath);
-        StartImportButton.IsEnabled = !busy && _scanReport is not null && !string.IsNullOrWhiteSpace(_outputDirectory);
-        OpenOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(_outputDirectory) && Directory.Exists(_outputDirectory);
-    }
-
     private static string GetUserMessage(Exception exception, string fallback) => exception switch
     {
         UnauthorizedAccessException => "VoiceBridge doesn't have permission to read the source or write to the destination. Choose locations you can access.",
         PathTooLongException => "The selected source or destination path is too long. Choose a shorter path and try again.",
         DirectoryNotFoundException => "A selected folder is no longer available. Choose the source and destination again, then retry.",
         FileNotFoundException => "A selected file is no longer available. Choose the source again, then retry.",
-        IOException => "VoiceBridge couldn't read or write a file. Check that the source is available and the destination has space, then try again.",
-        InvalidDataException => "VoiceBridge couldn't read this as a supported Google Voice Takeout. Check that the source is complete and try again.",
+        IOException => exception.Message,
+        InvalidDataException => exception.Message,
         ArgumentException => exception.Message,
         NotSupportedException => "This source or destination type isn't supported. Choose a local ZIP file, extracted folder, and writable destination.",
         _ => fallback
     };
+
+    private sealed record WorkspaceData(
+        IReadOnlyList<WorkspaceEntry> Messages,
+        IReadOnlyList<WorkspaceEntry> Calls,
+        IReadOnlyList<WorkspaceEntry> Voicemails,
+        IReadOnlyList<WorkspaceEntry> MediaReferences,
+        long MediaFileCount,
+        IReadOnlyList<WorkspaceEntry> ImportIssues);
 }
+
+public sealed record WorkspaceEntry(string Heading, string Metadata, string Body, string Evidence);

@@ -32,6 +32,7 @@
   <ItemGroup>
     <Compile Include="..\..\src\VoiceBridge.Desktop\Diagnostics\CrashLogPolicy.cs" Link="Desktop\Diagnostics\CrashLogPolicy.cs" />
     <Compile Include="..\..\src\VoiceBridge.Desktop\Diagnostics\LocalCrashLog.cs" Link="Desktop\Diagnostics\LocalCrashLog.cs" />
+    <Compile Include="..\..\src\VoiceBridge.Desktop\Presentation\WorkspaceStatusPresentation.cs" Link="Desktop\Presentation\WorkspaceStatusPresentation.cs" />
   </ItemGroup>
 
 </Project>

@@ -14,4 +14,5 @@ public sealed record ScanReport(
     long CandidateCallEventPages,
     long OtherVoiceFiles,
     long UnknownFiles,
-    IReadOnlyList<ScanWarning> Warnings);
+    IReadOnlyList<ScanWarning> Warnings,
+    long TotalBytes = 0);

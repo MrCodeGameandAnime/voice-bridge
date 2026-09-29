@@ -3,88 +3,252 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="VoiceBridge">
-    <Grid x:Name="RootGrid" Background="#F4F6FA">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel MaxWidth="940" Padding="32,28,32,40" Spacing="20" HorizontalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="14">
-                    <Image Source="ms-appx:///Assets/VoiceBridgeMark.png" Width="56" Height="56" VerticalAlignment="Top" AutomationProperties.Name="VoiceBridge bridge icon" />
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="VoiceBridge" FontSize="16" FontWeight="SemiBold" Foreground="#315C8C" />
-                        <TextBlock Text="Your Google Voice history, kept local" FontSize="32" FontWeight="SemiBold" Foreground="#172033" TextWrapping="Wrap" />
-                        <TextBlock Text="Choose a Takeout export, review what it contains, and build an offline archive on this PC." FontSize="16" Foreground="#596579" TextWrapping="Wrap" />
-                    </StackPanel>
-                </StackPanel>
-
-                <Border Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
-                    <StackPanel Spacing="16">
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="1  Choose your Google Voice Takeout" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
-                            <TextBlock Text="Select the original ZIP file or the extracted Takeout folder. VoiceBridge reads the source without changing it." Foreground="#596579" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button x:Name="SelectZipButton" Content="Select ZIP" Click="SelectZip_Click" />
-                            <Button x:Name="SelectFolderButton" Content="Select Folder" Click="SelectFolder_Click" />
-                        </StackPanel>
-                        <TextBox x:Name="SourcePathBox" Header="Takeout source" IsReadOnly="True" PlaceholderText="No source selected" AutomationProperties.Name="Selected Takeout source" />
-
-                        <StackPanel Spacing="4" Margin="0,8,0,0">
-                            <TextBlock Text="2  Choose where VoiceBridge should save the result" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
-                            <TextBlock Text="The destination will contain a local database, an import report, and the offline HTML archive." Foreground="#596579" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button x:Name="SelectOutputButton" Content="Select Output Folder" Click="SelectOutput_Click" />
-                            <TextBlock x:Name="OutputPathText" VerticalAlignment="Center" Foreground="#596579" Text="No destination selected" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <Button x:Name="ScanButton" Content="Scan Takeout" Style="{ThemeResource AccentButtonStyle}" Click="Scan_Click" HorizontalAlignment="Left" />
+    <NavigationView
+        x:Name="WorkspaceNavigation"
+        PaneDisplayMode="Left"
+        IsPaneOpen="True"
+        IsPaneToggleButtonVisible="False"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        OpenPaneLength="320"
+        SelectionChanged="Navigation_SelectionChanged">
+        <NavigationView.Resources>
+            <DataTemplate x:Key="WorkspaceEntryTemplate">
+                <Border
+                    Margin="0,0,0,10"
+                    Padding="16"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <StackPanel Spacing="7">
+                        <TextBlock Text="{Binding Heading}" FontSize="16" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Metadata}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Body}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        <TextBlock Text="{Binding Evidence}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                     </StackPanel>
                 </Border>
-
-                <Border Background="#EAF1FA" CornerRadius="8" Padding="14,11">
-                    <TextBlock x:Name="StatusText" Foreground="#344054" Text="Choose a source and destination to begin." TextWrapping="Wrap" />
-                </Border>
-
-                <Border x:Name="ScanCard" Visibility="Collapsed" Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Scan summary" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
-                        <TextBlock x:Name="ScanSummaryText" Foreground="#344054" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ScanWarningText" Foreground="#8A5511" TextWrapping="Wrap" />
-                        <Button x:Name="StartImportButton" Content="Start Import" Style="{ThemeResource AccentButtonStyle}" Click="StartImport_Click" HorizontalAlignment="Left" />
-                    </StackPanel>
-                </Border>
-
-                <Border x:Name="ProgressCard" Visibility="Collapsed" Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Working on your archive" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
-                        <TextBlock x:Name="ProgressStatusText" Foreground="#344054" TextWrapping="Wrap" />
-                        <ProgressBar x:Name="OperationProgressBar" Minimum="0" Maximum="100" IsIndeterminate="True" />
-                        <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" HorizontalAlignment="Left" />
-                    </StackPanel>
-                </Border>
-
-                <Border x:Name="ResultsCard" Visibility="Collapsed" Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Import results" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
-                        <TextBlock x:Name="ResultsSummaryText" Foreground="#344054" TextWrapping="Wrap" />
-                        <TextBlock x:Name="ResultStatusText" Foreground="#8A5511" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <Button x:Name="OpenArchiveButton" Content="Open Archive" Click="OpenArchive_Click" />
-                            <Button x:Name="ViewIssuesButton" Content="View Issues" Click="ViewIssues_Click" />
-                            <Button x:Name="OpenOutputButton" Content="Open Output Folder" Click="OpenOutput_Click" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20" Margin="0,4,0,0">
-                    <StackPanel Spacing="3" VerticalAlignment="Center">
-                        <TextBlock Text="Your Takeout and generated archive stay on this computer." FontSize="13" Foreground="#667085" TextWrapping="Wrap" />
-                        <TextBlock x:Name="VersionAttributionText" FontSize="12" Foreground="#667085" Text="404 Builds · VoiceBridge" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <Button Content="Privacy" Click="Privacy_Click" AutomationProperties.Name="Read the VoiceBridge privacy statement" />
-                        <Button Content="About" Click="About_Click" AutomationProperties.Name="About VoiceBridge" />
+            </DataTemplate>
+        </NavigationView.Resources>
+        <NavigationView.PaneHeader>
+            <StackPanel Padding="18,18,18,10" Spacing="14">
+                <Grid ColumnDefinitions="48,*" ColumnSpacing="12">
+                    <Image Source="ms-appx:///Assets/VoiceBridgeMark.png" Width="44" Height="44" VerticalAlignment="Center" AutomationProperties.Name="VoiceBridge icon" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="VoiceBridge" FontSize="20" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="Google Voice" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
                 </Grid>
+                <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <StackPanel Spacing="5">
+                    <TextBlock Text="SOURCE" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="SidebarSourceText" Text="○ No archive loaded" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" ToolTipService.ToolTip="No archive loaded" />
+                </StackPanel>
             </StackPanel>
-        </ScrollViewer>
-    </Grid>
+        </NavigationView.PaneHeader>
+
+        <NavigationView.MenuItems>
+            <NavigationViewItemHeader Content="CONTENT" />
+            <NavigationViewItem x:Name="MessagesNavigationItem" Tag="Messages" AutomationProperties.Name="Messages">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinWidth="188">
+                    <TextBlock Text="Messages" VerticalAlignment="Center" />
+                    <TextBlock x:Name="MessagesCountText" Grid.Column="1" Text="—" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="CallsNavigationItem" Tag="Calls" AutomationProperties.Name="Calls">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinWidth="188">
+                    <TextBlock Text="Calls" VerticalAlignment="Center" />
+                    <TextBlock x:Name="CallsCountText" Grid.Column="1" Text="—" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="VoicemailsNavigationItem" Tag="Voicemails" AutomationProperties.Name="Voicemails">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinWidth="188">
+                    <TextBlock Text="Voicemails" VerticalAlignment="Center" />
+                    <TextBlock x:Name="VoicemailsCountText" Grid.Column="1" Text="—" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="MediaNavigationItem" Tag="Media" AutomationProperties.Name="Media">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinWidth="188">
+                    <TextBlock Text="Media" VerticalAlignment="Center" />
+                    <TextBlock x:Name="MediaCountText" Grid.Column="1" Text="—" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </NavigationViewItem>
+            <NavigationViewItemHeader>
+                <StackPanel Margin="12,10,12,10" Spacing="5">
+                    <TextBlock Text="HEALTH" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="HealthParsedText" Text="Not scanned" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="HealthIssuesText" Text="Not scanned for issues" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="HealthSourceText" Text="Source not verified" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="HealthExportText" Text="Archive not built" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </NavigationViewItemHeader>
+            <NavigationViewItemHeader Content="TOOLS" />
+            <NavigationViewItem x:Name="OverviewNavigationItem" Content="Overview" Tag="Overview" IsSelected="True" />
+            <NavigationViewItem x:Name="IssuesNavigationItem" Tag="Issues">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" MinWidth="188">
+                    <TextBlock x:Name="IssuesNavigationLabelText" Text="Issues" VerticalAlignment="Center" />
+                    <TextBlock x:Name="IssuesCountText" Grid.Column="1" Text="—" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="ExportNavigationItem" Content="Export" Tag="Export" />
+        </NavigationView.MenuItems>
+
+        <NavigationView.PaneFooter>
+            <StackPanel Padding="8,4,8,12" Spacing="4">
+                <Button x:Name="PrivacyButton" Content="Privacy" HorizontalAlignment="Stretch" Click="Privacy_Click" AutomationProperties.Name="Read the VoiceBridge privacy statement" />
+                <Button x:Name="AboutButton" Content="About" HorizontalAlignment="Stretch" Click="About_Click" AutomationProperties.Name="About VoiceBridge" />
+                <TextBlock x:Name="VersionAttributionText" Margin="12,5,12,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="404 Builds · VoiceBridge" TextWrapping="Wrap" />
+            </StackPanel>
+        </NavigationView.PaneFooter>
+
+        <Grid x:Name="RootGrid" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+            <Grid RowDefinitions="Auto,*">
+                <Border Grid.Row="0" Margin="24,16,24,0" Padding="12,8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                        <TextBlock x:Name="StatusText" Text="Open a Google Voice Takeout to begin." Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <ProgressBar x:Name="OperationProgressBar" Width="150" Height="8" IsIndeterminate="True" Visibility="Collapsed" AutomationProperties.Name="VoiceBridge operation progress" />
+                            <Button x:Name="CancelButton" Content="Cancel" Visibility="Collapsed" Click="Cancel_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1">
+                    <Grid x:Name="OverviewView" Margin="28" Visibility="Visible">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel MaxWidth="1100" HorizontalAlignment="Left" Spacing="18">
+                                <StackPanel Spacing="5">
+                                    <TextBlock x:Name="OverviewTitleText" Text="Open your Google Voice Takeout" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="OverviewSubtitleText" Text="Select the original ZIP or extracted folder. VoiceBridge will inspect it without modifying it." FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                                    <StackPanel Spacing="14">
+                                        <TextBlock Text="SOURCE ARCHIVE" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock x:Name="OverviewSourcePathText" Text="No archive selected" FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="OverviewSourceSummaryText" Text="Choose a Google Voice Takeout ZIP or extracted folder to inspect it locally." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button x:Name="SelectZipButton" Content="Select ZIP" Style="{ThemeResource AccentButtonStyle}" Click="SelectZip_Click" AutomationProperties.Name="Select a Google Voice Takeout ZIP" />
+                                            <Button x:Name="SelectFolderButton" Content="Select Folder" Click="SelectFolder_Click" AutomationProperties.Name="Select an extracted Google Voice Takeout folder" />
+                                            <Button x:Name="ScanButton" Content="Scan archive" Click="Scan_Click" IsEnabled="False" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="ScanSummaryText" Text="Scanning checks the archive and classifies its files. It does not require an output destination." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                                    <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="CONTENT" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock x:Name="OverviewMessagesText" Text="Messages  —" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <TextBlock x:Name="OverviewCallsText" Text="Calls  —" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <TextBlock x:Name="OverviewVoicemailsText" Text="Voicemails  —" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <TextBlock x:Name="OverviewMediaText" Text="Media  —" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="HEALTH" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock x:Name="OverviewHealthParsedText" Text="Not scanned" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="OverviewHealthIssuesText" Text="Not scanned for issues" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="OverviewHealthSourceText" Text="Source not verified" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="OverviewHealthExportText" Text="Archive not built" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <Border Padding="18" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                                        <StackPanel Spacing="5">
+                                            <TextBlock Text="NEXT ACTION" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock x:Name="NextActionText" Text="Select an archive, then scan it." Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Button x:Name="OpenExportButton" Grid.Column="1" Content="Go to Export" Click="OpenExport_Click" VerticalAlignment="Center" IsEnabled="False" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <Grid x:Name="MessagesView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
+                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
+                            <TextBlock Text="Messages" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="MessagesViewSummaryText" Text="Build the local archive to inspect parsed messages." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ListView x:Name="MessagesListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Parsed messages" />
+                    </Grid>
+
+                    <Grid x:Name="CallsView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
+                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
+                            <TextBlock Text="Calls" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="CallsViewSummaryText" Text="Build the local archive to inspect parsed call records." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ListView x:Name="CallsListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Parsed calls" />
+                    </Grid>
+
+                    <Grid x:Name="VoicemailsView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
+                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
+                            <TextBlock Text="Voicemails" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="VoicemailsViewSummaryText" Text="Build the local archive to inspect transcripts and media references." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ListView x:Name="VoicemailsListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Parsed voicemails" />
+                    </Grid>
+
+                    <Grid x:Name="MediaView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
+                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
+                            <TextBlock Text="Media" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="MediaViewSummaryText" Text="Build the local archive to inspect source media and attachment matches." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ListView x:Name="MediaListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Source media and attachment references" />
+                    </Grid>
+
+                    <Grid x:Name="IssuesView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
+                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
+                            <TextBlock Text="Issues" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="IssuesViewSummaryText" Text="Scan warnings and import/export findings will remain visible here." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ListView x:Name="IssuesListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Scan, import, and export issues" />
+                    </Grid>
+
+                    <Grid x:Name="ExportView" Margin="28" Visibility="Collapsed">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel MaxWidth="1000" HorizontalAlignment="Left" Spacing="18">
+                                <StackPanel Spacing="5">
+                                    <TextBlock Text="Export" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                    <TextBlock Text="Choose where VoiceBridge should create its local database, import report, and offline archive." FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Text="BUILD THE OFFLINE ARCHIVE" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock x:Name="ExportSourceSummaryText" Text="Select and scan a Takeout source in Overview first." Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button x:Name="SelectOutputButton" Content="Choose destination folder" Click="SelectOutput_Click" IsEnabled="False" />
+                                            <TextBlock x:Name="OutputPathText" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="No destination selected" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <TextBlock Text="Creates voicebridge.db, import-report.json, and an archive folder containing the offline HTML archive. Existing files are never overwritten." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <Button x:Name="BuildArchiveButton" Content="Build local archive" Style="{ThemeResource AccentButtonStyle}" Click="BuildArchive_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                        <TextBlock x:Name="BuildResultText" Text="No archive has been built in this session." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button x:Name="OpenArchiveButton" Content="Open offline archive" Click="OpenArchive_Click" IsEnabled="False" />
+                                            <Button x:Name="OpenOutputButton" Content="Open destination folder" Click="OpenOutput_Click" IsEnabled="False" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Text="OPTIONAL CSV EXPORT" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="Creates relational CSV tables and an export report in a new csv-export folder under the destination above. Media paths and unresolved relationships remain recorded; source media is not copied by CSV export." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <Button x:Name="ExportCsvButton" Content="Create CSV export" Click="ExportCsv_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                        <TextBlock x:Name="CsvResultText" Text="" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <Button x:Name="OpenCsvOutputButton" Content="Open CSV export folder" Click="OpenCsvOutput_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </NavigationView>
 </Window>

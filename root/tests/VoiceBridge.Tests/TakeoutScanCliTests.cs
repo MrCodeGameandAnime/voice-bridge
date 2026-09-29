@@ -29,6 +29,7 @@ public sealed class TakeoutScanCliTests
         Assert.Equal("zipArchive", report.RootElement.GetProperty("sourceKind").GetString());
         Assert.True(report.RootElement.GetProperty("voiceContentFound").GetBoolean());
         Assert.Equal(7, report.RootElement.GetProperty("filesScanned").GetInt64());
+        Assert.Equal(84, report.RootElement.GetProperty("totalBytes").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("candidateImageVideoMediaFiles").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("candidateAudioMediaFiles").GetInt64());
@@ -57,6 +58,7 @@ public sealed class TakeoutScanCliTests
 
         Assert.Equal("directory", report.RootElement.GetProperty("sourceKind").GetString());
         Assert.Equal(5, report.RootElement.GetProperty("filesScanned").GetInt64());
+        Assert.Equal(43, report.RootElement.GetProperty("totalBytes").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("candidateImageVideoMediaFiles").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("candidateAudioMediaFiles").GetInt64());
