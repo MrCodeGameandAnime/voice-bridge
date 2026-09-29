@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VoiceBridge.Core\VoiceBridge.Core.csproj" />
+    <ProjectReference Include="..\VoiceBridge.Storage\VoiceBridge.Storage.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -23,7 +23,7 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         _transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(Schema, cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync("PRAGMA user_version = 1;", cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync("PRAGMA user_version = 2;", cancellationToken).ConfigureAwait(false);
 
         var archiveId = await InsertAndGetIdAsync(
             "INSERT INTO source_archives(source_kind, source_path, source_sha256, files_scanned) VALUES ($kind, $path, $sha, $count);",
@@ -55,7 +55,7 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
             cancellationToken.ThrowIfCancellationRequested();
             var sourceFile = sourceFiles[index];
             var id = await InsertAndGetIdAsync(
-                "INSERT INTO source_files(source_archive_id, ordinal, relative_path, size_bytes, media_type) VALUES ($archive, $ordinal, $path, $size, $media);",
+                "INSERT INTO source_files(source_archive_id, ordinal, relative_path, size_bytes, media_type, content_sha256) VALUES ($archive, $ordinal, $path, $size, $media, $sha);",
                 command =>
                 {
                     command.Parameters.AddWithValue("$archive", archiveId);
@@ -63,6 +63,7 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
                     command.Parameters.AddWithValue("$path", sourceFile.RelativePath);
                     command.Parameters.AddWithValue("$size", sourceFile.SizeBytes);
                     command.Parameters.AddWithValue("$media", (object?)sourceFile.MediaType ?? DBNull.Value);
+                    command.Parameters.AddWithValue("$sha", (object?)sourceFile.ContentSha256 ?? DBNull.Value);
                 }, cancellationToken).ConfigureAwait(false);
 
             if (counts[sourceFile.RelativePath] == 1)
@@ -283,7 +284,8 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
             ordinal INTEGER NOT NULL,
             relative_path TEXT NOT NULL,
             size_bytes INTEGER NOT NULL,
-            media_type TEXT
+            media_type TEXT,
+            content_sha256 TEXT
         );
         CREATE TABLE conversations (
             id INTEGER PRIMARY KEY,

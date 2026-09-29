@@ -43,6 +43,46 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
 
         await using var sourceLifetime = sourceItems;
         var sourceFiles = sourceItems.Items.Select(item => item.SourceFile).ToArray();
+        var rootIsVoice = IsVoiceRoot(fullSourcePath, scanReport.SourceKind);
+        var sourceFileHashIssues = new List<ImportIssueRecord>();
+        if (scanReport.SourceKind == SourceKind.Directory)
+        {
+            for (var index = 0; index < sourceItems.Items.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var item = sourceItems.Items[index];
+                if (!IsMediaSourceFile(item.SourceFile) || !IsVoicePath(item.SourceFile.RelativePath, rootIsVoice))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await using var mediaStream = item.OpenRead();
+                    if (mediaStream.CanSeek && mediaStream.Length != item.SourceFile.SizeBytes)
+                    {
+                        throw new InvalidDataException("The media file size changed after the source inventory was scanned.");
+                    }
+
+                    var hash = await ComputeSha256Async(mediaStream, cancellationToken).ConfigureAwait(false);
+                    sourceFiles[index] = item.SourceFile with { ContentSha256 = hash };
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+                {
+                    sourceFileHashIssues.Add(new ImportIssueRecord(
+                        new ImportIssue(
+                            "media_source_hash_unavailable",
+                            "A media source file could not be verified during import; its reference is retained without copied media.",
+                            item.SourceFile.RelativePath),
+                        ImportIssueSeverity.Warning));
+                }
+            }
+        }
+
         var sourceSha256 = scanReport.SourceKind == SourceKind.ZipArchive
             ? await ComputeSha256Async(fullSourcePath, cancellationToken).ConfigureAwait(false)
             : null;
@@ -50,7 +90,7 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
         await using var store = storeFactory.Create(fullDatabasePath);
         await store.InitializeAsync(identity, startedAt, scanReport, sourceFiles, cancellationToken).ConfigureAwait(false);
 
-        var issues = new List<ImportIssueRecord>();
+        var issues = new List<ImportIssueRecord>(sourceFileHashIssues);
         foreach (var warning in scanReport.Warnings)
         {
             var issue = new ImportIssue(warning.Code, warning.Message, warning.RelativePath);
@@ -59,10 +99,14 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
             await store.WriteIssueAsync(record, cancellationToken).ConfigureAwait(false);
         }
 
+        foreach (var issue in sourceFileHashIssues)
+        {
+            await store.WriteIssueAsync(issue, cancellationToken).ConfigureAwait(false);
+        }
+
         var voiceHtmlItems = sourceItems.Items
             .Where(item => IsVoiceHtml(item.SourceFile.RelativePath, IsVoiceRoot(fullSourcePath, scanReport.SourceKind)))
             .ToArray();
-        var rootIsVoice = IsVoiceRoot(fullSourcePath, scanReport.SourceKind);
         var mediaSourceFiles = sourceFiles
             .Where(sourceFile => IsMediaSourceFile(sourceFile) && IsVoicePath(sourceFile.RelativePath, rootIsVoice))
             .ToArray();
@@ -243,6 +287,11 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
     private static async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return await ComputeSha256Async(stream, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<string> ComputeSha256Async(Stream stream, CancellationToken cancellationToken)
+    {
         using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[1024 * 1024];
         int bytesRead;

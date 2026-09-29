@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using VoiceBridge.Core.Importing;
 using VoiceBridge.Core.Scanning;
+using VoiceBridge.Export;
 using VoiceBridge.Storage;
 
 namespace VoiceBridge.Cli;
@@ -76,6 +77,11 @@ internal static class Program
             return RunImport(args, cancellationToken, logger);
         }
 
+        if (args[0].Equals("export", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunExport(args, cancellationToken, logger);
+        }
+
         logger.LogError("This command is not available yet. Run 'voicebridge --help' for usage.");
         return 2;
     }
@@ -134,6 +140,41 @@ internal static class Program
         Console.Out.WriteLine();
         Console.Out.WriteLine($"Database: {databasePath}");
         Console.Out.WriteLine($"Report:   {reportPath}");
+        return 0;
+    }
+
+    private static int RunExport(string[] args, CancellationToken cancellationToken, ILogger logger)
+    {
+        if (args.Length != 5 || !args[3].Equals("--output", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogError("Usage: voicebridge export <html|csv> <database> --output <directory>");
+            return 2;
+        }
+
+        var databasePath = Path.GetFullPath(args[2]);
+        var outputDirectory = Path.GetFullPath(args[4]);
+        var summary = args[1].ToLowerInvariant() switch
+        {
+            "html" => TakeoutArchiveExporter.ExportHtmlAsync(databasePath, outputDirectory, cancellationToken).GetAwaiter().GetResult(),
+            "csv" => TakeoutArchiveExporter.ExportCsvAsync(databasePath, outputDirectory, cancellationToken).GetAwaiter().GetResult(),
+            _ => null
+        };
+
+        if (summary is null)
+        {
+            logger.LogError("Export format must be 'html' or 'csv'. Usage: voicebridge export <html|csv> <database> --output <directory>");
+            return 2;
+        }
+
+        var format = args[1].Equals("html", StringComparison.OrdinalIgnoreCase) ? "HTML archive" : "CSV";
+        Console.Out.WriteLine($"{format} export complete.");
+        WriteCount(Console.Out, "Conversations", summary.Conversations);
+        WriteCount(Console.Out, "Messages", summary.Messages);
+        WriteCount(Console.Out, "Attachments", summary.Attachments);
+        WriteCount(Console.Out, "Media copied", summary.MediaCopied);
+        WriteCount(Console.Out, "Media unavailable", summary.MediaUnavailable);
+        Console.Out.WriteLine();
+        Console.Out.WriteLine($"Output: {outputDirectory}");
         return 0;
     }
 
@@ -196,11 +237,13 @@ internal static class Program
         output.WriteLine("Usage:");
         output.WriteLine("  voicebridge scan <source> [--json]");
         output.WriteLine("  voicebridge import <source> --output <directory>");
+        output.WriteLine("  voicebridge export <html|csv> <database> --output <directory>");
         output.WriteLine("  voicebridge --help");
         output.WriteLine();
         output.WriteLine("Commands:");
         output.WriteLine("  scan          Inventory a ZIP archive or extracted Takeout directory.");
         output.WriteLine("  import        Create a local SQLite archive and import report.");
+        output.WriteLine("  export        Create an offline HTML archive or relational CSV files.");
         output.WriteLine();
         output.WriteLine("Options:");
         output.WriteLine("  --json        Write a machine-readable scan report to standard output.");
