@@ -79,6 +79,22 @@ public sealed class MessagePageParserTests
     }
 
     [Fact]
+    public void MalformedHtmlRetainsUnicodeEmojiAndDecodedEntities()
+    {
+        const string html = """
+            <!doctype html><html><body><div class=message><abbr class=dt title="2024-01-02T03:04:05+00:00"></abbr><a class=tel href="tel:+15551234567">Zoë 🚀</a><q>雪 &amp; sun &#x1F31E; café
+            """;
+
+        var result = new VoiceMessageParser().Parse(html, "Voice/Calls/odd-markup.html");
+
+        Assert.True(result.IsSupportedMessagePage);
+        var message = Assert.Single(result.Messages);
+        Assert.Equal("Zoë 🚀", message.Sender?.RawDisplayName);
+        Assert.Equal("雪 & sun 🌞 café", message.Body);
+        Assert.Empty(result.Issues);
+    }
+
+    [Fact]
     public void MalformedRowsProduceIssuesAndRemainAvailableAsPartialMessages()
     {
         var parser = new VoiceMessageParser();

@@ -240,15 +240,24 @@ public sealed class TakeoutImportCliTests
         var callsPath = Path.Combine(sourcePath, "Voice", "Calls");
         Directory.CreateDirectory(callsPath);
         File.WriteAllText(Path.Combine(callsPath, "Alex - Text - 2024-01-02T03_04_05Z.html"), """
-            <html><body><div class="message"><abbr class="dt" title="2024-01-02T03:04:05+00:00"></abbr><a class="tel" href="tel:+15551234567">Alex</a><q>Cancellation test</q></div></body></html>
+            <html><body><div class="message"><abbr class="dt" title="2024-01-02T03:04:05+00:00"></abbr><a class="tel" href="tel:+15551234567">Alex</a><q>Cancellation test first page</q></div></body></html>
             """);
-        var databasePath = Path.Combine(temporary.RootPath, "result", "voicebridge.db");
+        File.WriteAllText(Path.Combine(callsPath, "Jordan - Text - 2024-01-02T03_05_05Z.html"), """
+            <html><body><div class="message"><abbr class="dt" title="2024-01-02T03:05:05+00:00"></abbr><a class="tel" href="tel:+15551234568">Jordan</a><q>Cancellation test second page</q></div></body></html>
+            """);
+        var outputDirectory = Path.Combine(temporary.RootPath, "result");
+        Directory.CreateDirectory(outputDirectory);
+        var keepPath = Path.Combine(outputDirectory, "keep.txt");
+        File.WriteAllText(keepPath, "Preserve existing output files.");
+        var databasePath = Path.Combine(outputDirectory, "voicebridge.db");
         using var cancellation = new CancellationTokenSource();
         var service = new TakeoutImportService(new SqliteTakeoutImportStoreFactory());
+        var cancelledAfterFirstPage = false;
         service.ProgressChanged += (_, progress) =>
         {
-            if (progress.Stage == ImportProgressStage.ProcessingMessages)
+            if (progress.Stage == ImportProgressStage.ProcessingMessages && progress.Completed == 1)
             {
+                cancelledAfterFirstPage = true;
                 cancellation.Cancel();
             }
         };
@@ -256,7 +265,9 @@ public sealed class TakeoutImportCliTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => service.ImportAsync(sourcePath, databasePath, cancellation.Token));
 
+        Assert.True(cancelledAfterFirstPage);
         Assert.False(File.Exists(databasePath));
+        Assert.Equal("Preserve existing output files.", File.ReadAllText(keepPath));
     }
 
     [Fact]
