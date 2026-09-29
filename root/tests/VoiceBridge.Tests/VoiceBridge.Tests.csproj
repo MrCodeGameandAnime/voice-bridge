@@ -29,4 +29,9 @@
     <ProjectReference Include="..\..\src\VoiceBridge.Cli\VoiceBridge.Cli.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\src\VoiceBridge.Desktop\Diagnostics\CrashLogPolicy.cs" Link="Desktop\Diagnostics\CrashLogPolicy.cs" />
+    <Compile Include="..\..\src\VoiceBridge.Desktop\Diagnostics\LocalCrashLog.cs" Link="Desktop\Diagnostics\LocalCrashLog.cs" />
+  </ItemGroup>
+
 </Project>

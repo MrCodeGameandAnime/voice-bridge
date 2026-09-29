@@ -5,11 +5,14 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Windowing;
 using VoiceBridge.Core.Importing;
 using VoiceBridge.Core.Scanning;
+using VoiceBridge.Desktop.Diagnostics;
 using VoiceBridge.Export;
 using VoiceBridge.Storage;
 using Windows.Storage.Pickers;
+using Windows.Graphics;
 using WinRT.Interop;
 
 namespace VoiceBridge.Desktop;
@@ -29,6 +32,11 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Title = "VoiceBridge";
+        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        VersionAttributionText.Text = $"404 Builds · VoiceBridge {version}";
+        var windowHandle = WindowNative.GetWindowHandle(this);
+        var appWindow = AppWindow.GetFromWindowId(Win32Interop.GetWindowIdFromWindow(windowHandle));
+        appWindow.Resize(new SizeInt32(1040, 880));
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread()
             ?? throw new InvalidOperationException("The UI dispatcher is unavailable.");
     }
@@ -82,7 +90,9 @@ public sealed partial class MainWindow : Window
             if (folder is not null)
             {
                 _outputDirectory = folder.Path;
-                OutputPathText.Text = folder.Path;
+                OutputPathText.Text = FormatPathForDisplay(folder.Path);
+                ToolTipService.SetToolTip(OutputPathText, folder.Path);
+                UpdateCrashLogDirectory();
                 ResultsCard.Visibility = Visibility.Collapsed;
                 RefreshControls();
             }
@@ -299,6 +309,42 @@ public sealed partial class MainWindow : Window
         await dialog.ShowAsync();
     }
 
+    private async void About_Click(object sender, RoutedEventArgs e)
+    {
+        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        var about = new StackPanel { Spacing = 10 };
+        about.Children.Add(new TextBlock { Text = $"VoiceBridge {version}", FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        about.Children.Add(new TextBlock { Text = "Built by 404 Builds.", TextWrapping = TextWrapping.Wrap });
+        about.Children.Add(new TextBlock { Text = "VoiceBridge reads the Google Voice Takeout you select and creates a local database, report, and offline HTML archive in your chosen output folder.", TextWrapping = TextWrapping.Wrap });
+        about.Children.Add(new TextBlock { Text = "No account is required. VoiceBridge does not add telemetry or upload your Takeout.", TextWrapping = TextWrapping.Wrap });
+        await ShowDialogAsync("About VoiceBridge", about);
+    }
+
+    private async void Privacy_Click(object sender, RoutedEventArgs e)
+    {
+        var privacy = new TextBlock
+        {
+            Text = "VoiceBridge processes the source you select on this PC. It does not use accounts, cloud processing, or telemetry. Your Takeout ZIP or extracted source is read without being changed. The database, import report, and offline archive are written only to the destination folder you choose.\n\n"
+                + "If VoiceBridge encounters an unhandled application failure after you choose a safe output folder, it may save a local crash log there. The log can contain exception details and local file paths. It is never sent automatically; review it before choosing to share it. No crash log is created before a safe output folder is selected.\n\n"
+                + "Removing the VoiceBridge application folder does not delete your selected output folder or crash logs. You control those files.",
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true
+        };
+        await ShowDialogAsync("VoiceBridge privacy", new ScrollViewer { MaxHeight = 480, Content = privacy });
+    }
+
+    private async Task ShowDialogAsync(string title, object content)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = content,
+            CloseButtonText = "Close",
+            XamlRoot = RootGrid.XamlRoot
+        };
+        await dialog.ShowAsync();
+    }
+
     private static string FormatIssue(ImportIssueRecord issue)
     {
         var location = issue.SourceRelativePath is null ? string.Empty : $"\nSource: {issue.SourceRelativePath}";
@@ -374,7 +420,9 @@ public sealed partial class MainWindow : Window
     private void SetSource(string sourcePath)
     {
         _sourcePath = sourcePath;
-        SourcePathBox.Text = sourcePath;
+        SourcePathBox.Text = FormatPathForDisplay(sourcePath);
+        ToolTipService.SetToolTip(SourcePathBox, sourcePath);
+        UpdateCrashLogDirectory();
         _scanReport = null;
         ScanCard.Visibility = Visibility.Collapsed;
         ResultsCard.Visibility = Visibility.Collapsed;
@@ -391,6 +439,33 @@ public sealed partial class MainWindow : Window
             ProgressStatusText.Text = message;
             ProgressStatusText.Foreground = new SolidColorBrush(isError ? Colors.DarkRed : Colors.DarkSlateGray);
         }
+    }
+
+    private void UpdateCrashLogDirectory()
+    {
+        if (Application.Current is App app)
+        {
+            app.CrashLogDirectory = CrashLogPolicy.Resolve(_sourcePath, _outputDirectory);
+        }
+    }
+
+    private static string FormatPathForDisplay(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(fullPath);
+        var trimmedPath = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (root is not null && trimmedPath.Equals(
+                root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return fullPath;
+        }
+
+        var leaf = Path.GetFileName(trimmedPath);
+        var parent = Path.GetFileName(Path.GetDirectoryName(trimmedPath));
+        return string.IsNullOrWhiteSpace(parent)
+            ? leaf
+            : $"…{Path.DirectorySeparatorChar}{parent}{Path.DirectorySeparatorChar}{leaf}";
     }
 
     private async Task ShowMessageAsync(string message)
@@ -419,9 +494,13 @@ public sealed partial class MainWindow : Window
     private static string GetUserMessage(Exception exception, string fallback) => exception switch
     {
         UnauthorizedAccessException => "VoiceBridge doesn't have permission to read the source or write to the destination. Choose locations you can access.",
+        PathTooLongException => "The selected source or destination path is too long. Choose a shorter path and try again.",
+        DirectoryNotFoundException => "A selected folder is no longer available. Choose the source and destination again, then retry.",
+        FileNotFoundException => "A selected file is no longer available. Choose the source again, then retry.",
         IOException => "VoiceBridge couldn't read or write a file. Check that the source is available and the destination has space, then try again.",
-        InvalidDataException => exception.Message,
+        InvalidDataException => "VoiceBridge couldn't read this as a supported Google Voice Takeout. Check that the source is complete and try again.",
         ArgumentException => exception.Message,
+        NotSupportedException => "This source or destination type isn't supported. Choose a local ZIP file, extracted folder, and writable destination.",
         _ => fallback
     };
 }

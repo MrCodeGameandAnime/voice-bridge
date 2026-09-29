@@ -6,10 +6,13 @@
     <Grid x:Name="RootGrid" Background="#F4F6FA">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel MaxWidth="940" Padding="32,28,32,40" Spacing="20" HorizontalAlignment="Center">
-                <StackPanel Spacing="6">
-                    <TextBlock Text="VoiceBridge" FontSize="16" FontWeight="SemiBold" Foreground="#315C8C" />
-                    <TextBlock Text="Your Google Voice history, kept local" FontSize="32" FontWeight="SemiBold" Foreground="#172033" TextWrapping="Wrap" />
-                    <TextBlock Text="Choose a Takeout export, review what it contains, and build an offline archive on this PC." FontSize="16" Foreground="#596579" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                    <Image Source="ms-appx:///Assets/VoiceBridgeMark.png" Width="56" Height="56" VerticalAlignment="Top" AutomationProperties.Name="VoiceBridge bridge icon" />
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="VoiceBridge" FontSize="16" FontWeight="SemiBold" Foreground="#315C8C" />
+                        <TextBlock Text="Your Google Voice history, kept local" FontSize="32" FontWeight="SemiBold" Foreground="#172033" TextWrapping="Wrap" />
+                        <TextBlock Text="Choose a Takeout export, review what it contains, and build an offline archive on this PC." FontSize="16" Foreground="#596579" TextWrapping="Wrap" />
+                    </StackPanel>
                 </StackPanel>
 
                 <Border Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
@@ -71,7 +74,16 @@
                     </StackPanel>
                 </Border>
 
-                <TextBlock Text="Your Takeout and generated archive stay on this computer." FontSize="13" Foreground="#667085" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20" Margin="0,4,0,0">
+                    <StackPanel Spacing="3" VerticalAlignment="Center">
+                        <TextBlock Text="Your Takeout and generated archive stay on this computer." FontSize="13" Foreground="#667085" TextWrapping="Wrap" />
+                        <TextBlock x:Name="VersionAttributionText" FontSize="12" Foreground="#667085" Text="404 Builds · VoiceBridge" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button Content="Privacy" Click="Privacy_Click" AutomationProperties.Name="Read the VoiceBridge privacy statement" />
+                        <Button Content="About" Click="About_Click" AutomationProperties.Name="About VoiceBridge" />
+                    </StackPanel>
+                </Grid>
             </StackPanel>
         </ScrollViewer>
     </Grid>
