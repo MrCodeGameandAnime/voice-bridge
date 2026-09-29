@@ -100,13 +100,22 @@ In this archive, every one of the 18,732 `div.message` rows has a recognized `ab
 - The 35 `a.video[href]` values are distinct bare-relative references. Each maps unambiguously by extensionless stem to one archive media file: 31 `.3gp` and four `.mp4`. The parser now preserves these `href` values as attachment references with an unknown media type; the class marker alone does not set the type.
 - The source archive SHA-256 remained `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C` after validation; it was not extracted or modified.
 
+## Gate 4 conversation reconstruction validation
+
+- Reconstruction produced one conversation per supported source message page: 2,443 conversations containing all 18,732 rows. Source-relative paths remain the identity boundary; pages are not merged solely because labels or participants look alike.
+- The archive yielded 2,427 one-to-one conversations, 9 confirmed group conversations, and 7 conversations whose membership remains unknown. The 9 group pages each have at least two distinct phone identities in explicit page-member evidence. The 7 unknown cases are one-row text pages with empty sender `tel:` targets.
+- Phone normalization removes formatting punctuation, retains a leading `+`, and does not apply country-code assumptions. Raw participant values and their evidence source remain available beside normalized identities. Message direction stays unknown.
+- Messages are sorted by parsed timestamp, then source row order; rows with no parsed timestamp sort last. Identical bodies are retained. No exact duplicate source-page content groups were found; all pages remain present even when duplicate content is detected.
+- Of 973 message attachment references, 945 matched by exact relative path, exact basename, or unique extensionless stem. Twenty-eight remain unresolved and generate issues. Unambiguous video links can receive a matched path and media type from the source file extension; the `video` class itself does not establish either value.
+- The full pass produced 5,270 issues: 5,181 unsupported non-message HTML pages, 61 empty sender phone targets, and 28 unresolved message attachment references. Unsupported call/event and voicemail parsing remains outside Gate 4. No exceptions occurred and the source archive hash was unchanged.
+
 ## What remains unknown after this sample
 
 - Whether other exports use different folder names, casing, nesting, or split-archive layouts.
 - Whether older/newer exports, locales, or account types use additional HTML templates or timestamp encodings. This archive showed 33 structural signatures but only one timestamp-value format; that does not prove there are no other versions. [S3]
 - How `Me` maps to the account's Voice number, and when names or numbers are omitted from participant links.
 - Whether every group-named file represents a distinct group conversation, and how membership changes or conversation renames should be represented.
-- The targets of 38 media references that did not match by exact path, basename, or extensionless stem; those references may be missing, transformed, or use a different linking rule.
+- The targets of Gate 0.5's 38 unmatched unique image/audio references and Gate 4's 28 unresolved message references; these may be absent, transformed, or use another linking rule and should not be called missing without stronger evidence.
 - The meaning of the two `recording-error-message` records, the contents/semantics of VCFs, and the association between each voicemail HTML page and each MP3 file.
 - Whether greetings, billing history, service address, or other official Voice export categories appear in other archives. They were not present as recognized files here. [S1]
 - Whether any JSON, CSV, or other structured formats accompany different exports.

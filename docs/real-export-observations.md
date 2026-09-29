@@ -158,6 +158,29 @@ The archive has zero duplicate full paths under case-insensitive comparison and 
 - Inspection of the 35 video-class rows found one `a.video[href]` per row. The 35 distinct bare-relative targets each matched exactly one archive media file by extensionless stem: 31 `.3gp` and four `.mp4`. The parser now preserves the raw href as an attachment reference while leaving media type and matched path unknown; the class name alone does not determine either value.
 - The source archive SHA-256 remained `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C` after validation. No extraction or source modification occurred.
 
+## Gate 4 conversation reconstruction validation
+
+The Gate 4 pass reconstructed every supported message page in the ignored Takeout archive, using one source HTML path as one conversation identity. It did not merge separate pages based on similar labels or phone numbers.
+
+| Result | Count | Handling |
+|---|---:|---|
+| Message pages / conversations | 2,443 | Each conversation retains its source-relative path and raw filename label |
+| Message rows retained | 18,732 | No rows removed during sorting or duplicate detection |
+| One-to-one conversations | 2,427 | Exact `Text` filename timestamp shape, no explicit page-member links, and one or two normalized sender phone identities |
+| Confirmed group conversations | 9 | Each had a group-style filename and at least two distinct phone identities in explicit page-member evidence |
+| Unknown conversations | 7 | Each was a one-row text page with an empty sender `tel:` target; membership and sender phone remain unknown |
+| Exact duplicate source-page groups | 0 | Every source page remains represented; detection hashes the decoded HTML content |
+| Attachment references matched | 945 / 973 | Exact relative path, exact basename, or a unique extensionless stem |
+| Attachment references unresolved | 28 / 973 | Kept with their raw reference and a row-scoped issue; no match was guessed |
+
+The group classifier also accepts three or more distinct normalized phone identities when they are evidenced by explicit page members or message-row senders. A group-style filename without sufficient membership evidence remains `Unknown` and gets a `conversation_membership_ambiguous` issue. The nine observed group pages met the explicit page-member threshold.
+
+Phone normalization removes observed presentation punctuation and whitespace, retains a leading `+`, and does not add or remove a country prefix. Unsupported forms remain unknown. Participant display names are normalized separately, while raw names and phone values remain in participant evidence. Page-level members and row-level senders are retained as distinct evidence sources.
+
+Messages are ordered by parsed timestamp, with missing timestamps last and source row order as the tie-breaker. Identical bodies at different times remain separate messages. Direction remains unknown. Attachment types come from an explicit HTML media element or, when the parser has no type, from the uniquely matched source file extension; the `video` class alone is not used to assign a type.
+
+The reconstruction pass emitted 5,270 issues: 5,181 unsupported-page reports for call/event and voicemail HTML outside this message-specific gate, 61 empty sender `tel:` reports, and 28 unresolved attachment references. It completed without parser or reconstruction exceptions. The source archive SHA-256 remained `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C`; the archive was read in place and not modified.
+
 ## Gate 0 comparison
 
 Gate 0 proposed a discovery-oriented inventory, per-file HTML/message structures, MMS and group variation, media references, calls and voicemail, timestamps, participants, and explicit treatment of uncertainty. The real archive validates several concrete examples but does not establish a universal Takeout contract.
@@ -167,7 +190,7 @@ Gate 0 proposed a discovery-oriented inventory, per-file HTML/message structures
 - This export has `Takeout/Voice/Calls/` with per-conversation or event HTML and adjacent media; all `Calls/` entries are direct children.
 - Message HTML contains multiple `div.message` rows, not just one message per file. The 2,443 message/conversation pages contain 18,732 rows.
 - The observed message rows expose timestamp, sender-link, and body nodes. Call/event timestamps use `abbr.published`; duration is optional and absent on missed-call pages.
-- Media references are present and should be matched to archive files conservatively. Some resolve only by extensionless stem, and unresolved references exist.
+- Media references are present and should be matched to archive files conservatively. Some resolve only by extensionless stem, and unresolved references exist. Gate 0.5's 38 unmatched unique references cover its broader image/audio audit; the Gate 4 message-only pass independently left 28 of 973 references unresolved.
 - Group-like structures and filename/contact labels vary. Preserving source evidence and leaving uncertain participant, direction, and membership semantics unknown remains necessary.
 - The inventory must be broad and retain unsupported/ambiguous cases. A `Calls/`-only or one-template assumption would lose observed Voice data.
 

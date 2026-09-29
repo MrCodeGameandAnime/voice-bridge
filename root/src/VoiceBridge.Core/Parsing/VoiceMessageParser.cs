@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
@@ -13,18 +14,21 @@ public sealed class VoiceMessageParser
         ArgumentNullException.ThrowIfNull(html);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceRelativePath);
 
+        var sourceContentSha256 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(html)));
         var document = new HtmlParser().ParseDocument(html);
         var rows = document.QuerySelectorAll("div.message");
         if (rows.Length == 0)
         {
             return new MessagePageParseResult(
+                sourceRelativePath,
                 false,
                 [],
                 [],
                 [new ImportIssue(
                     "unsupported_message_page",
                     "The HTML page contains no observed div.message rows.",
-                    sourceRelativePath)]);
+                    sourceRelativePath)],
+                sourceContentSha256);
         }
 
         var messages = new List<Message>(rows.Length);
@@ -93,7 +97,13 @@ public sealed class VoiceMessageParser
                 AttachmentReferences: attachmentReferences));
         }
 
-        return new MessagePageParseResult(true, messages, pageParticipantEvidence, issues);
+        return new MessagePageParseResult(
+            sourceRelativePath,
+            true,
+            messages,
+            pageParticipantEvidence,
+            issues,
+            sourceContentSha256);
     }
 
     private static Participant? ParseSender(IElement row, string sourceRelativePath, int rowIndex, List<ImportIssue> issues)

@@ -145,6 +145,22 @@ public sealed class MessagePageParserTests
         Assert.Null(attachment.MatchedRelativePath);
     }
 
+    [Fact]
+    public void ParseResultKeepsSourcePathAndStableContentFingerprint()
+    {
+        var parser = new VoiceMessageParser();
+        var html = ReadFixture("text-message.html");
+
+        var first = parser.Parse(html, "Voice/Calls/first.html");
+        var duplicate = parser.Parse(html, "Voice/Calls/copy.html");
+        var changed = parser.Parse(html + " ", "Voice/Calls/changed.html");
+
+        Assert.Equal("Voice/Calls/first.html", first.SourceRelativePath);
+        Assert.Matches("^[A-F0-9]{64}$", first.SourceContentSha256);
+        Assert.Equal(first.SourceContentSha256, duplicate.SourceContentSha256);
+        Assert.NotEqual(first.SourceContentSha256, changed.SourceContentSha256);
+    }
+
     private static string ReadFixture(string name) =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Voice", name));
 }
