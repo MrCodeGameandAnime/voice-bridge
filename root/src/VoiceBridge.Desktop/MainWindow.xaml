@@ -1,0 +1,78 @@
+<Window
+    x:Class="VoiceBridge.Desktop.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="VoiceBridge">
+    <Grid x:Name="RootGrid" Background="#F4F6FA">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="940" Padding="32,28,32,40" Spacing="20" HorizontalAlignment="Center">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="VoiceBridge" FontSize="16" FontWeight="SemiBold" Foreground="#315C8C" />
+                    <TextBlock Text="Your Google Voice history, kept local" FontSize="32" FontWeight="SemiBold" Foreground="#172033" TextWrapping="Wrap" />
+                    <TextBlock Text="Choose a Takeout export, review what it contains, and build an offline archive on this PC." FontSize="16" Foreground="#596579" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <Border Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
+                    <StackPanel Spacing="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="1  Choose your Google Voice Takeout" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
+                            <TextBlock Text="Select the original ZIP file or the extracted Takeout folder. VoiceBridge reads the source without changing it." Foreground="#596579" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="SelectZipButton" Content="Select ZIP" Click="SelectZip_Click" />
+                            <Button x:Name="SelectFolderButton" Content="Select Folder" Click="SelectFolder_Click" />
+                        </StackPanel>
+                        <TextBox x:Name="SourcePathBox" Header="Takeout source" IsReadOnly="True" PlaceholderText="No source selected" AutomationProperties.Name="Selected Takeout source" />
+
+                        <StackPanel Spacing="4" Margin="0,8,0,0">
+                            <TextBlock Text="2  Choose where VoiceBridge should save the result" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
+                            <TextBlock Text="The destination will contain a local database, an import report, and the offline HTML archive." Foreground="#596579" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="SelectOutputButton" Content="Select Output Folder" Click="SelectOutput_Click" />
+                            <TextBlock x:Name="OutputPathText" VerticalAlignment="Center" Foreground="#596579" Text="No destination selected" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button x:Name="ScanButton" Content="Scan Takeout" Style="{ThemeResource AccentButtonStyle}" Click="Scan_Click" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#EAF1FA" CornerRadius="8" Padding="14,11">
+                    <TextBlock x:Name="StatusText" Foreground="#344054" Text="Choose a source and destination to begin." TextWrapping="Wrap" />
+                </Border>
+
+                <Border x:Name="ScanCard" Visibility="Collapsed" Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Scan summary" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
+                        <TextBlock x:Name="ScanSummaryText" Foreground="#344054" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ScanWarningText" Foreground="#8A5511" TextWrapping="Wrap" />
+                        <Button x:Name="StartImportButton" Content="Start Import" Style="{ThemeResource AccentButtonStyle}" Click="StartImport_Click" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <Border x:Name="ProgressCard" Visibility="Collapsed" Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Working on your archive" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
+                        <TextBlock x:Name="ProgressStatusText" Foreground="#344054" TextWrapping="Wrap" />
+                        <ProgressBar x:Name="OperationProgressBar" Minimum="0" Maximum="100" IsIndeterminate="True" />
+                        <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <Border x:Name="ResultsCard" Visibility="Collapsed" Background="White" BorderBrush="#DEE4ED" BorderThickness="1" CornerRadius="12" Padding="24">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Import results" FontSize="20" FontWeight="SemiBold" Foreground="#172033" />
+                        <TextBlock x:Name="ResultsSummaryText" Foreground="#344054" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ResultStatusText" Foreground="#8A5511" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button x:Name="OpenArchiveButton" Content="Open Archive" Click="OpenArchive_Click" />
+                            <Button x:Name="ViewIssuesButton" Content="View Issues" Click="ViewIssues_Click" />
+                            <Button x:Name="OpenOutputButton" Content="Open Output Folder" Click="OpenOutput_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="Your Takeout and generated archive stay on this computer." FontSize="13" Foreground="#667085" TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
