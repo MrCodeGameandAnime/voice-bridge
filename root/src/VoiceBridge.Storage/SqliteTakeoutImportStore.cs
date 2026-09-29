@@ -23,7 +23,7 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         _transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(Schema, cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync("PRAGMA user_version = 2;", cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync("PRAGMA user_version = 3;", cancellationToken).ConfigureAwait(false);
 
         var archiveId = await InsertAndGetIdAsync(
             "INSERT INTO source_archives(source_kind, source_path, source_sha256, files_scanned) VALUES ($kind, $path, $sha, $count);",
@@ -161,6 +161,112 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
         }
     }
 
+    public async ValueTask WriteCallAsync(CallRecord call, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        var callId = await InsertAndGetIdAsync(
+            "INSERT INTO call_records(import_run_id, source_file_id, source_relative_path, raw_event_type, raw_timestamp, timestamp_utc, raw_contact, raw_filename_contact, raw_contact_source, raw_phone_number, raw_duration_title, duration_display_text, duration_seconds) VALUES ($run, $source, $path, $event, $raw_timestamp, $timestamp, $contact, $filename_contact, $contact_source, $phone, $duration_title, $duration_text, $duration_seconds);",
+            command =>
+            {
+                command.Parameters.AddWithValue("$run", _importRunId);
+                command.Parameters.AddWithValue("$source", FindSourceFileId(call.SourceRelativePath));
+                command.Parameters.AddWithValue("$path", call.SourceRelativePath);
+                command.Parameters.AddWithValue("$event", (object?)call.RawEventType ?? DBNull.Value);
+                command.Parameters.AddWithValue("$raw_timestamp", (object?)call.RawTimestamp ?? DBNull.Value);
+                command.Parameters.AddWithValue("$timestamp", (object?)(call.Timestamp is null ? null : FormatDate(call.Timestamp.Value)) ?? DBNull.Value);
+                command.Parameters.AddWithValue("$contact", (object?)call.RawContact ?? DBNull.Value);
+                command.Parameters.AddWithValue("$filename_contact", (object?)call.RawFilenameContact ?? DBNull.Value);
+                command.Parameters.AddWithValue("$contact_source", (object?)call.RawContactSource ?? DBNull.Value);
+                command.Parameters.AddWithValue("$phone", (object?)call.RawPhoneNumber ?? DBNull.Value);
+                command.Parameters.AddWithValue("$duration_title", (object?)call.RawDurationTitle ?? DBNull.Value);
+                command.Parameters.AddWithValue("$duration_text", (object?)call.DurationDisplayText ?? DBNull.Value);
+                command.Parameters.AddWithValue("$duration_seconds", (object?)(call.Duration?.TotalSeconds) ?? DBNull.Value);
+            }, cancellationToken).ConfigureAwait(false);
+
+        await ExecuteAsync(
+            "INSERT INTO event_search(record_type, record_id, content) VALUES ('call', $id, $content);",
+            command =>
+            {
+                command.Parameters.AddWithValue("$id", callId);
+                command.Parameters.AddWithValue("$content", string.Join(' ', new[] { call.RawEventType, call.RawContact, call.RawFilenameContact, call.RawPhoneNumber, call.RawDurationTitle, call.DurationDisplayText }.Where(value => !string.IsNullOrWhiteSpace(value))));
+            }, cancellationToken).ConfigureAwait(false);
+
+        var references = call.MediaReferences ?? [];
+        for (var index = 0; index < references.Count; index++)
+        {
+            await WriteCallMediaReferenceAsync(callId, index, references[index], cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask WriteVoicemailAsync(Voicemail voicemail, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(voicemail);
+        var voicemailId = await InsertAndGetIdAsync(
+            "INSERT INTO voicemails(import_run_id, source_file_id, source_relative_path, raw_timestamp, timestamp_utc, raw_contact, raw_filename_contact, raw_contact_source, raw_phone_number, transcript, raw_duration_title, duration_display_text, duration_seconds, audio_reference, matched_audio_source_file_id, matched_audio_relative_path, audio_match_status) VALUES ($run, $source, $path, $raw_timestamp, $timestamp, $contact, $filename_contact, $contact_source, $phone, $transcript, $duration_title, $duration_text, $duration_seconds, $audio_reference, $audio_source, $audio_path, $audio_status);",
+            command =>
+            {
+                command.Parameters.AddWithValue("$run", _importRunId);
+                command.Parameters.AddWithValue("$source", FindSourceFileId(voicemail.SourceRelativePath));
+                command.Parameters.AddWithValue("$path", voicemail.SourceRelativePath);
+                command.Parameters.AddWithValue("$raw_timestamp", (object?)voicemail.RawTimestamp ?? DBNull.Value);
+                command.Parameters.AddWithValue("$timestamp", (object?)(voicemail.Timestamp is null ? null : FormatDate(voicemail.Timestamp.Value)) ?? DBNull.Value);
+                command.Parameters.AddWithValue("$contact", (object?)voicemail.RawContact ?? DBNull.Value);
+                command.Parameters.AddWithValue("$filename_contact", (object?)voicemail.RawFilenameContact ?? DBNull.Value);
+                command.Parameters.AddWithValue("$contact_source", (object?)voicemail.RawContactSource ?? DBNull.Value);
+                command.Parameters.AddWithValue("$phone", (object?)voicemail.RawPhoneNumber ?? DBNull.Value);
+                command.Parameters.AddWithValue("$transcript", (object?)voicemail.Transcript ?? DBNull.Value);
+                command.Parameters.AddWithValue("$duration_title", (object?)voicemail.RawDurationTitle ?? DBNull.Value);
+                command.Parameters.AddWithValue("$duration_text", (object?)voicemail.DurationDisplayText ?? DBNull.Value);
+                command.Parameters.AddWithValue("$duration_seconds", (object?)(voicemail.Duration?.TotalSeconds) ?? DBNull.Value);
+                command.Parameters.AddWithValue("$audio_reference", (object?)voicemail.AudioReference ?? DBNull.Value);
+                command.Parameters.AddWithValue("$audio_source", FindSourceFileId(voicemail.MatchedAudioRelativePath));
+                command.Parameters.AddWithValue("$audio_path", (object?)voicemail.MatchedAudioRelativePath ?? DBNull.Value);
+                command.Parameters.AddWithValue("$audio_status", voicemail.AudioMatchStatus);
+            }, cancellationToken).ConfigureAwait(false);
+
+        await ExecuteAsync(
+            "INSERT INTO event_search(record_type, record_id, content) VALUES ('voicemail', $id, $content);",
+            command =>
+            {
+                command.Parameters.AddWithValue("$id", voicemailId);
+                command.Parameters.AddWithValue("$content", string.Join(' ', new[] { voicemail.RawContact, voicemail.RawFilenameContact, voicemail.RawPhoneNumber, voicemail.Transcript, voicemail.RawDurationTitle, voicemail.DurationDisplayText }.Where(value => !string.IsNullOrWhiteSpace(value))));
+            }, cancellationToken).ConfigureAwait(false);
+
+        var references = voicemail.MediaReferences ?? [];
+        for (var index = 0; index < references.Count; index++)
+        {
+            await WriteVoicemailMediaReferenceAsync(voicemailId, index, references[index], cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask WriteCallMediaReferenceAsync(long callId, int ordinal, MediaReference reference, CancellationToken cancellationToken) =>
+        await ExecuteAsync(
+            "INSERT INTO call_media_references(call_record_id, ordinal, raw_reference, matched_source_file_id, matched_relative_path, media_type, match_status) VALUES ($call, $ordinal, $raw, $source, $path, $media, $status);",
+            command =>
+            {
+                command.Parameters.AddWithValue("$call", callId);
+                command.Parameters.AddWithValue("$ordinal", ordinal);
+                command.Parameters.AddWithValue("$raw", reference.RawReference);
+                command.Parameters.AddWithValue("$source", FindSourceFileId(reference.MatchedRelativePath));
+                command.Parameters.AddWithValue("$path", (object?)reference.MatchedRelativePath ?? DBNull.Value);
+                command.Parameters.AddWithValue("$media", (object?)reference.MediaType ?? DBNull.Value);
+                command.Parameters.AddWithValue("$status", reference.MatchStatus);
+            }, cancellationToken);
+
+    private async ValueTask WriteVoicemailMediaReferenceAsync(long voicemailId, int ordinal, MediaReference reference, CancellationToken cancellationToken) =>
+        await ExecuteAsync(
+            "INSERT INTO voicemail_media_references(voicemail_id, ordinal, raw_reference, matched_source_file_id, matched_relative_path, media_type, match_status) VALUES ($voicemail, $ordinal, $raw, $source, $path, $media, $status);",
+            command =>
+            {
+                command.Parameters.AddWithValue("$voicemail", voicemailId);
+                command.Parameters.AddWithValue("$ordinal", ordinal);
+                command.Parameters.AddWithValue("$raw", reference.RawReference);
+                command.Parameters.AddWithValue("$source", FindSourceFileId(reference.MatchedRelativePath));
+                command.Parameters.AddWithValue("$path", (object?)reference.MatchedRelativePath ?? DBNull.Value);
+                command.Parameters.AddWithValue("$media", (object?)reference.MediaType ?? DBNull.Value);
+                command.Parameters.AddWithValue("$status", reference.MatchStatus);
+            }, cancellationToken);
+
     public ValueTask WriteIssueAsync(ImportIssueRecord issue, CancellationToken cancellationToken) => ExecuteAsync(
         "INSERT INTO import_issues(import_run_id, code, message, severity, source_file_id, source_relative_path, source_row_index) VALUES ($run, $code, $message, $severity, $source, $path, $row);",
         command =>
@@ -178,13 +284,18 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
     {
         ArgumentNullException.ThrowIfNull(report);
         await ExecuteAsync(
-            "UPDATE import_runs SET status = 'Completed', finished_at = $finished, messages_parsed = $messages, conversations_parsed = $conversations, attachments_parsed = $attachments, records_skipped = $skipped, warnings = $warnings, errors = $errors WHERE id = $run;",
+            "UPDATE import_runs SET status = 'Completed', finished_at = $finished, messages_parsed = $messages, conversations_parsed = $conversations, attachments_parsed = $attachments, calls_parsed = $calls, voicemails_parsed = $voicemails, media_references_parsed = $media, media_references_matched = $media_matched, media_references_unresolved = $media_unresolved, records_skipped = $skipped, warnings = $warnings, errors = $errors WHERE id = $run;",
             command =>
             {
                 command.Parameters.AddWithValue("$finished", FormatDate(report.FinishedAt));
                 command.Parameters.AddWithValue("$messages", report.RecordsParsed.Messages);
                 command.Parameters.AddWithValue("$conversations", report.RecordsParsed.Conversations);
                 command.Parameters.AddWithValue("$attachments", report.RecordsParsed.Attachments);
+                command.Parameters.AddWithValue("$calls", report.RecordsParsed.Calls);
+                command.Parameters.AddWithValue("$voicemails", report.RecordsParsed.Voicemails);
+                command.Parameters.AddWithValue("$media", report.RecordsParsed.MediaReferences);
+                command.Parameters.AddWithValue("$media_matched", report.RecordsParsed.MatchedMediaReferences);
+                command.Parameters.AddWithValue("$media_unresolved", report.RecordsParsed.UnresolvedMediaReferences);
                 command.Parameters.AddWithValue("$skipped", report.RecordsSkipped);
                 command.Parameters.AddWithValue("$warnings", report.Warnings);
                 command.Parameters.AddWithValue("$errors", report.Errors);
@@ -274,6 +385,11 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
             messages_parsed INTEGER NOT NULL DEFAULT 0,
             conversations_parsed INTEGER NOT NULL DEFAULT 0,
             attachments_parsed INTEGER NOT NULL DEFAULT 0,
+            calls_parsed INTEGER NOT NULL DEFAULT 0,
+            voicemails_parsed INTEGER NOT NULL DEFAULT 0,
+            media_references_parsed INTEGER NOT NULL DEFAULT 0,
+            media_references_matched INTEGER NOT NULL DEFAULT 0,
+            media_references_unresolved INTEGER NOT NULL DEFAULT 0,
             records_skipped INTEGER NOT NULL DEFAULT 0,
             warnings INTEGER NOT NULL DEFAULT 0,
             errors INTEGER NOT NULL DEFAULT 0
@@ -330,6 +446,62 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
             matched_relative_path TEXT,
             media_type TEXT
         );
+        CREATE TABLE call_records (
+            id INTEGER PRIMARY KEY,
+            import_run_id INTEGER NOT NULL REFERENCES import_runs(id),
+            source_file_id INTEGER REFERENCES source_files(id),
+            source_relative_path TEXT NOT NULL,
+            raw_event_type TEXT,
+            raw_timestamp TEXT,
+            timestamp_utc TEXT,
+            raw_contact TEXT,
+            raw_filename_contact TEXT,
+            raw_contact_source TEXT,
+            raw_phone_number TEXT,
+            raw_duration_title TEXT,
+            duration_display_text TEXT,
+            duration_seconds REAL
+        );
+        CREATE TABLE call_media_references (
+            id INTEGER PRIMARY KEY,
+            call_record_id INTEGER NOT NULL REFERENCES call_records(id),
+            ordinal INTEGER NOT NULL,
+            raw_reference TEXT NOT NULL,
+            matched_source_file_id INTEGER REFERENCES source_files(id),
+            matched_relative_path TEXT,
+            media_type TEXT,
+            match_status TEXT NOT NULL
+        );
+        CREATE TABLE voicemails (
+            id INTEGER PRIMARY KEY,
+            import_run_id INTEGER NOT NULL REFERENCES import_runs(id),
+            source_file_id INTEGER REFERENCES source_files(id),
+            source_relative_path TEXT NOT NULL,
+            raw_timestamp TEXT,
+            timestamp_utc TEXT,
+            raw_contact TEXT,
+            raw_filename_contact TEXT,
+            raw_contact_source TEXT,
+            raw_phone_number TEXT,
+            transcript TEXT,
+            raw_duration_title TEXT,
+            duration_display_text TEXT,
+            duration_seconds REAL,
+            audio_reference TEXT,
+            matched_audio_source_file_id INTEGER REFERENCES source_files(id),
+            matched_audio_relative_path TEXT,
+            audio_match_status TEXT NOT NULL
+        );
+        CREATE TABLE voicemail_media_references (
+            id INTEGER PRIMARY KEY,
+            voicemail_id INTEGER NOT NULL REFERENCES voicemails(id),
+            ordinal INTEGER NOT NULL,
+            raw_reference TEXT NOT NULL,
+            matched_source_file_id INTEGER REFERENCES source_files(id),
+            matched_relative_path TEXT,
+            media_type TEXT,
+            match_status TEXT NOT NULL
+        );
         CREATE TABLE import_issues (
             id INTEGER PRIMARY KEY,
             import_run_id INTEGER NOT NULL REFERENCES import_runs(id),
@@ -347,8 +519,15 @@ internal sealed class SqliteTakeoutImportStore(SqliteConnection connection, stri
         CREATE INDEX ix_messages_conversation_timestamp ON messages(conversation_id, timestamp_utc);
         CREATE INDEX ix_messages_source ON messages(source_file_id, source_row_index);
         CREATE INDEX ix_attachments_source ON attachments(matched_source_file_id);
+        CREATE INDEX ix_calls_run_timestamp ON call_records(import_run_id, timestamp_utc);
+        CREATE INDEX ix_calls_source ON call_records(source_file_id);
+        CREATE INDEX ix_voicemails_run_timestamp ON voicemails(import_run_id, timestamp_utc);
+        CREATE INDEX ix_voicemails_source ON voicemails(source_file_id);
+        CREATE INDEX ix_call_media_source ON call_media_references(matched_source_file_id);
+        CREATE INDEX ix_voicemail_media_source ON voicemail_media_references(matched_source_file_id);
         CREATE INDEX ix_issues_run_code ON import_issues(import_run_id, code);
         CREATE INDEX ix_issues_run_severity ON import_issues(import_run_id, severity);
         CREATE VIRTUAL TABLE message_search USING fts5(message_id UNINDEXED, conversation_id UNINDEXED, body);
+        CREATE VIRTUAL TABLE event_search USING fts5(record_type UNINDEXED, record_id UNINDEXED, content);
         """;
 }

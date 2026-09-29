@@ -78,6 +78,57 @@ public sealed class TakeoutExportCliTests
     }
 
     [Fact]
+    public async Task HtmlAndCsvExportsExposeCallsVoicemailsTranscriptsAndMatchedAudio()
+    {
+        using var temporary = new TemporaryDirectory();
+        var archivePath = Path.Combine(temporary.RootPath, "takeout.zip");
+        var importOutput = Path.Combine(temporary.RootPath, "import");
+        var htmlOutput = Path.Combine(temporary.RootPath, "archive");
+        var csvOutput = Path.Combine(temporary.RootPath, "csv");
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            WriteEntry(archive, "Takeout/Voice/Calls/call.html", """
+                <html><body><div class="haudio"><span class="fn">Missed call from <script>unsafe</script></span><a class="tel" href="tel:+15551234567">Caller &amp; contact</a><abbr class="published" title="2024-01-02T03:04:05-05:00"></abbr><audio src="call-recording.mp3"></audio></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/voicemail.html", """
+                <html><body><div class="haudio"><span class="fn">Voicemail from Caller</span><a class="tel" href="tel:+15550001111">Caller</a><abbr class="published" title="2024-01-03T04:05:06-05:00"></abbr><span class="full-text">Hello &lt;script&gt;do not run&lt;/script&gt;</span><audio src="voicemail.mp3"></audio></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/call-recording.mp3", "call audio");
+            WriteEntry(archive, "Takeout/Voice/Calls/voicemail.mp3", "voicemail audio");
+        }
+
+        Assert.Equal(0, CliTestHost.Run("import", archivePath, "--output", importOutput).ExitCode);
+        var databasePath = Path.Combine(importOutput, "voicebridge.db");
+        Assert.Equal(0, CliTestHost.Run("export", "html", databasePath, "--output", htmlOutput).ExitCode);
+        Assert.Equal(0, CliTestHost.Run("export", "csv", databasePath, "--output", csvOutput).ExitCode);
+
+        var index = File.ReadAllText(Path.Combine(htmlOutput, "index.html"));
+        var calls = File.ReadAllText(Path.Combine(htmlOutput, "calls.html"));
+        var voicemails = File.ReadAllText(Path.Combine(htmlOutput, "voicemails.html"));
+        var search = File.ReadAllText(Path.Combine(htmlOutput, "search.html"));
+        Assert.Contains("calls.html", index, StringComparison.Ordinal);
+        Assert.Contains("voicemails.html", index, StringComparison.Ordinal);
+        Assert.Contains("Caller &amp; contact", calls, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script>unsafe</script>", calls, StringComparison.Ordinal);
+        Assert.Contains("&lt;script&gt;do not run&lt;/script&gt;", voicemails, StringComparison.Ordinal);
+        Assert.Contains("<audio controls", voicemails, StringComparison.Ordinal);
+        Assert.Matches("assets/sourcefile-[0-9]+\\.mp3", voicemails);
+        Assert.Contains("Hello", search, StringComparison.Ordinal);
+        Assert.Contains("voicemails.html#voicemail-", search, StringComparison.Ordinal);
+        Assert.DoesNotContain("https://", index, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("http://", voicemails, StringComparison.OrdinalIgnoreCase);
+
+        var callsCsv = File.ReadAllText(Path.Combine(csvOutput, "calls.csv"));
+        var callMediaCsv = File.ReadAllText(Path.Combine(csvOutput, "call_media_references.csv"));
+        var voicemailsCsv = File.ReadAllText(Path.Combine(csvOutput, "voicemails.csv"));
+        var voicemailMediaCsv = File.ReadAllText(Path.Combine(csvOutput, "voicemail_media_references.csv"));
+        Assert.Contains("call_record_id,source_file_id", callsCsv, StringComparison.Ordinal);
+        Assert.Contains("recording.mp3", callMediaCsv, StringComparison.Ordinal);
+        Assert.Contains("voicemail_id,source_file_id", voicemailsCsv, StringComparison.Ordinal);
+        Assert.Contains("voicemail.mp3", voicemailMediaCsv, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExportRefusesToReplaceAnExistingDestination()
     {
         using var temporary = new TemporaryDirectory();

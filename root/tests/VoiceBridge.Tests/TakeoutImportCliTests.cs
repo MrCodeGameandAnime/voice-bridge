@@ -45,7 +45,7 @@ public sealed class TakeoutImportCliTests
         Assert.Equal(2, await ReadCountAsync(connection, "SELECT COUNT(*) FROM messages;"));
         Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM conversation_participants;"));
         Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM attachments WHERE matched_source_file_id IS NOT NULL;"));
-        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM import_issues WHERE code = 'unsupported_message_page';"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM import_issues WHERE code = 'unsupported_voice_event_page';"));
         Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM message_search WHERE message_search MATCH 'First';"));
 
         using var report = JsonDocument.Parse(File.ReadAllText(reportPath));
@@ -55,14 +55,70 @@ public sealed class TakeoutImportCliTests
         Assert.Equal(2, root.GetProperty("recordsParsed").GetProperty("messages").GetInt64());
         Assert.Equal(1, root.GetProperty("recordsParsed").GetProperty("conversations").GetInt64());
         Assert.Equal(1, root.GetProperty("recordsParsed").GetProperty("attachments").GetInt64());
+        Assert.Equal(0, root.GetProperty("recordsParsed").GetProperty("calls").GetInt64());
+        Assert.Equal(0, root.GetProperty("recordsParsed").GetProperty("voicemails").GetInt64());
         Assert.Equal(1, root.GetProperty("recordsSkipped").GetInt64());
         Assert.Equal(0, root.GetProperty("errors").GetInt64());
         Assert.Equal(2, root.GetProperty("warnings").GetInt64());
-        Assert.Equal(1, root.GetProperty("unsupportedStructures").GetProperty("unsupported_message_page").GetInt64());
+        Assert.Equal(1, root.GetProperty("unsupportedStructures").GetProperty("unsupported_voice_event_page").GetInt64());
         Assert.Contains(
             root.GetProperty("issues").EnumerateArray(),
             issue => issue.GetProperty("sourceRelativePath").GetString() == "Takeout/Voice/Calls/Caller - Received - 2024-01-02T03_04_05Z.html");
         Assert.DoesNotContain("First body", File.ReadAllText(reportPath), StringComparison.Ordinal);
+        await connection.CloseAsync();
+        SqliteConnection.ClearAllPools();
+    }
+
+    [Fact]
+    public async Task ImportIndexesCallsAndVoicemailsAndKeepsMissingAudioAsIssue()
+    {
+        using var temporary = new TemporaryDirectory();
+        var archivePath = Path.Combine(temporary.RootPath, "takeout.zip");
+        var databasePath = Path.Combine(temporary.RootPath, "result", "voicebridge.db");
+        using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            WriteEntry(archive, "Takeout/Voice/Calls/call.html", """
+                <html><body><div class="haudio"><span class="fn">Received call from Contact</span><a class="tel" href="tel:+15551234567">Contact</a><abbr class="published" title="2024-01-02T03:04:05-05:00"></abbr><abbr class="duration" title="Duration">visible duration</abbr><audio src="recording.mp3"></audio></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/voicemail.html", """
+                <html><body><div class="haudio"><span class="fn">Voicemail from Caller</span><a class="tel" href="tel:+15550001111">Caller</a><abbr class="published" title="2024-01-03T04:05:06-05:00"></abbr><span class="full-text">searchabletranscriptmarker retained words</span><audio src="voicemail.mp3"></audio></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Spam/voicemail-no-audio.html", """
+                <html><body><div class="haudio"><span class="fn">Voicemail from Unknown</span><a class="tel" href="tel:+15550002222">Unknown</a><abbr class="published" title="2024-01-04T05:06:07-05:00"></abbr></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Unmatched Contact - Voicemail - 2024-01-05T06_07_08Z.html", """
+                <html><body><div class="haudio"><span class="fn">Voicemail from </span><a class="tel" href="tel:+15550003333"><span></span></a><abbr class="published" title="2024-01-05T06:07:08-05:00"></abbr><audio src="missing-voicemail.mp3"></audio></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/recording.mp3", "call audio");
+            WriteEntry(archive, "Takeout/Voice/Calls/voicemail.mp3", "voicemail audio");
+        }
+
+        var report = await new TakeoutImportService(new SqliteTakeoutImportStoreFactory()).ImportAsync(archivePath, databasePath);
+
+        Assert.Equal(1, report.RecordsParsed.Calls);
+        Assert.Equal(3, report.RecordsParsed.Voicemails);
+        Assert.Equal(3, report.RecordsParsed.MediaReferences);
+        Assert.Equal(2, report.RecordsParsed.MatchedMediaReferences);
+        Assert.Equal(1, report.RecordsParsed.UnresolvedMediaReferences);
+        Assert.Contains(report.Issues, issue => issue.Code == "voicemail_audio_reference_missing");
+        Assert.Contains(report.Issues, issue => issue.Code == "voicemail_media_reference_unresolved");
+
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync();
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM call_records WHERE raw_event_type = 'Received';"));
+        Assert.Equal(3, await ReadCountAsync(connection, "SELECT COUNT(*) FROM voicemails;"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM call_media_references WHERE match_status = 'matched';"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM voicemail_media_references WHERE match_status = 'matched';"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM voicemail_media_references WHERE match_status = 'unresolved' AND raw_reference = 'missing-voicemail.mp3';"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM event_search WHERE event_search MATCH 'searchabletranscriptmarker';"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM voicemails WHERE audio_match_status = 'missing_reference' AND transcript IS NULL;"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM voicemails WHERE raw_contact = 'Unmatched Contact' AND raw_filename_contact = 'Unmatched Contact' AND raw_contact_source = 'filename_label';"));
+        Assert.Equal(1, await ReadCountAsync(connection, "SELECT COUNT(*) FROM import_issues WHERE code = 'voicemail_audio_reference_missing';"));
         await connection.CloseAsync();
         SqliteConnection.ClearAllPools();
     }

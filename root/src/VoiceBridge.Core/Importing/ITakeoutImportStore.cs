@@ -19,6 +19,10 @@ public interface ITakeoutImportStore : IAsyncDisposable
 
     ValueTask WriteConversationAsync(Conversation conversation, CancellationToken cancellationToken);
 
+    ValueTask WriteCallAsync(CallRecord call, CancellationToken cancellationToken);
+
+    ValueTask WriteVoicemailAsync(Voicemail voicemail, CancellationToken cancellationToken);
+
     ValueTask WriteIssueAsync(ImportIssueRecord issue, CancellationToken cancellationToken);
 
     ValueTask CompleteAsync(ImportReport report, CancellationToken cancellationToken);

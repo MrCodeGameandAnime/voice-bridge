@@ -7,4 +7,9 @@ public sealed record CallRecord(
     DateTimeOffset? Timestamp,
     string? RawContact,
     string? RawPhoneNumber,
-    TimeSpan? Duration);
+    TimeSpan? Duration,
+    string? RawDurationTitle = null,
+    string? DurationDisplayText = null,
+    IReadOnlyList<MediaReference>? MediaReferences = null,
+    string? RawFilenameContact = null,
+    string? RawContactSource = null);

@@ -151,6 +151,19 @@ These are starting concepts, not fixed schemas. Keep raw source values and prove
 
 Do not require every conversation, message, call, or voicemail to have normalized phone numbers, a known direction, or a matched attachment. Keep source identity available at each level so every derived record can be traced back.
 
+## Gate 7 real-export validation
+
+The Gate 7 importer and exporters were validated against the full archive described above. It classified every one of the 7,624 HTML pages: 2,443 message/conversation pages, 4,837 call events, and 344 voicemail events. It retained all 18,732 message rows, skipped zero records, and completed without parser exceptions.
+
+- Call and voicemail event labels were read from the prefix of the observed `.haudio .fn` content. The preserved call labels are `Placed`, `Received`, and `Missed`; `Voicemail` remains its own record type. No sent/received direction or call outcome is inferred from these labels.
+- Event timestamps are retained raw from `abbr.published[title]` and parsed only when the value has an explicit `Z` or numeric UTC offset. A value without an explicit zone remains unparsed and receives an invalid-timestamp issue, rather than inheriting the machine's local timezone. Contact labels and phone targets from `a.tel` are retained independently. When the link has no visible contact text, the parser uses the filename label only if the filename matches the observed contact / event / UTC-timestamp form for that exact event label. The raw filename label and its evidence source remain in the database and exports; the label is not normalized or treated as identity.
+- `abbr.duration` title and display text are preserved separately. A duration is parsed only when its value has the unambiguous `hours:minutes:seconds` shape. This archive yielded parsed durations for 4,130 calls and 344 voicemails; all 707 missed-call pages lacked a duration node.
+- Voicemail transcript text is preserved when present; 244 of 344 pages had `span.full-text`, while 100 had no transcript span. Missing transcripts remain null without an invented value. Of 344 voicemail records, 343 had a direct audio reference: 321 matched an archive file and 22 remained unresolved. One voicemail had no audio reference and was retained with an issue. Both observed call audio references matched; the two call pages with a recording-error marker were retained with issues.
+- Message rows retain their 973 media references, of which 945 matched and 28 remained unresolved. Across messages, calls, and voicemails, the importer retained 1,318 media references: 1,268 matched and 50 unresolved. Missing or unresolved media does not stop import.
+- The completed import reported 190 warnings, zero errors, and zero unsupported HTML pages. Warnings cover 38 records with no usable contact label, 38 with no phone target, 61 message rows with empty sender targets, two recording-error markers, one voicemail without audio, and 50 unresolved media references. Each source record remains available.
+- The HTML export included 2,443 conversation pages, calls, voicemails, transcripts, and matched local media; it copied 1,268 media files with zero unavailable. The relational CSV export included separate call, voicemail, and media-reference tables. No external HTTP(S) resource references were emitted.
+- The 196,388,878-byte Takeout retained SHA-256 `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C` before and after full import and export validation. No source extraction or modification occurred.
+
 ## Sources
 
 - **[S1]** Google Voice Help, [Export your data from Voice](https://support.google.com/voice/answer/10130510?hl=en-US). Official list of exportable data categories; no file-level schema.

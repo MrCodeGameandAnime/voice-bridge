@@ -111,10 +111,17 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
             .Where(sourceFile => IsMediaSourceFile(sourceFile) && IsVoicePath(sourceFile.RelativePath, rootIsVoice))
             .ToArray();
         var reconstructor = new ConversationReconstructor(mediaSourceFiles);
+        var mediaMatcher = new AttachmentReferenceMatcher(mediaSourceFiles);
         var parser = new VoiceMessageParser();
+        var eventParser = new VoiceEventParser();
         long messagesParsed = 0;
         long conversationsParsed = 0;
         long attachmentsParsed = 0;
+        long callsParsed = 0;
+        long voicemailsParsed = 0;
+        long mediaReferencesParsed = 0;
+        long mediaReferencesMatched = 0;
+        long mediaReferencesUnresolved = 0;
         long recordsSkipped = 0;
         long errors = 0;
 
@@ -128,14 +135,14 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
                 voiceHtmlItems.Length,
                 $"Processing Voice HTML page {index + 1:N0} of {voiceHtmlItems.Length:N0}"));
 
-            ConversationReconstructionResult reconstruction;
+            string html;
+            MessagePageParseResult messagePage;
             try
             {
                 await using var content = item.OpenRead();
                 using var reader = new StreamReader(content, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: false);
-                var html = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-                var page = parser.Parse(html, item.SourceFile.RelativePath);
-                reconstruction = reconstructor.Reconstruct(page);
+                html = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+                messagePage = parser.Parse(html, item.SourceFile.RelativePath);
             }
             catch (OperationCanceledException)
             {
@@ -147,7 +154,7 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
                 recordsSkipped++;
                 var issueRecord = new ImportIssueRecord(
                     new ImportIssue(
-                        "message_page_processing_failed",
+                        "voice_html_page_processing_failed",
                         "A Voice HTML file could not be read or processed and was retained as a source file.",
                         item.SourceFile.RelativePath),
                     ImportIssueSeverity.Error);
@@ -156,30 +163,82 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
                 continue;
             }
 
-            messagesParsed += reconstruction.Conversation?.Messages.Count ?? 0;
-            if (reconstruction.Conversation is not null)
+            if (messagePage.IsSupportedMessagePage)
             {
-                conversationsParsed++;
-                attachmentsParsed += reconstruction.Conversation.Messages.Sum(message => message.AttachmentReferences?.Count ?? 0);
-                await store.WriteConversationAsync(reconstruction.Conversation, cancellationToken).ConfigureAwait(false);
+                var reconstruction = reconstructor.Reconstruct(messagePage);
+                if (reconstruction.Conversation is null)
+                {
+                    recordsSkipped++;
+                }
+                else
+                {
+                    messagesParsed += reconstruction.Conversation.Messages.Count;
+                    conversationsParsed++;
+                    var messageAttachments = reconstruction.Conversation.Messages
+                    .SelectMany(message => message.AttachmentReferences ?? [])
+                    .ToArray();
+                    attachmentsParsed += messageAttachments.Length;
+                    mediaReferencesParsed += messageAttachments.Length;
+                    mediaReferencesMatched += messageAttachments.LongCount(attachment => attachment.MatchedRelativePath is not null);
+                    mediaReferencesUnresolved += messageAttachments.LongCount(attachment => attachment.MatchedRelativePath is null);
+                    await store.WriteConversationAsync(reconstruction.Conversation, cancellationToken).ConfigureAwait(false);
+                }
+
+                var messageIssues = reconstruction.Conversation is null ? messagePage.Issues : reconstruction.Issues;
+                foreach (var issue in messageIssues)
+                {
+                    await WriteWarningAsync(issue).ConfigureAwait(false);
+                }
+
+                continue;
             }
-            else
+
+            var eventResult = eventParser.Parse(html, item.SourceFile.RelativePath);
+            if (!eventResult.IsSupportedEventPage)
             {
                 recordsSkipped++;
             }
 
-            foreach (var issue in reconstruction.Issues)
+            foreach (var issue in eventResult.Issues)
             {
-                var issueRecord = new ImportIssueRecord(issue, ImportIssueSeverity.Warning);
-                issues.Add(issueRecord);
-                await store.WriteIssueAsync(issueRecord, cancellationToken).ConfigureAwait(false);
+                await WriteWarningAsync(issue).ConfigureAwait(false);
+            }
+
+            if (eventResult.CallRecord is not null)
+            {
+                var call = ResolveMediaReferences(eventResult.CallRecord, mediaMatcher, out var mediaIssues);
+                callsParsed++;
+                var references = call.MediaReferences ?? [];
+                mediaReferencesParsed += references.Count;
+                mediaReferencesMatched += references.LongCount(reference => reference.MatchStatus == "matched");
+                mediaReferencesUnresolved += references.LongCount(reference => reference.MatchStatus is "unresolved" or "ambiguous");
+                await store.WriteCallAsync(call, cancellationToken).ConfigureAwait(false);
+                foreach (var issue in mediaIssues)
+                {
+                    await WriteWarningAsync(issue).ConfigureAwait(false);
+                }
+            }
+
+            if (eventResult.Voicemail is not null)
+            {
+                var voicemail = ResolveMediaReferences(eventResult.Voicemail, mediaMatcher, out var mediaIssues);
+                voicemailsParsed++;
+                var references = voicemail.MediaReferences ?? [];
+                mediaReferencesParsed += references.Count;
+                mediaReferencesMatched += references.LongCount(reference => reference.MatchStatus == "matched");
+                mediaReferencesUnresolved += references.LongCount(reference => reference.MatchStatus is "unresolved" or "ambiguous");
+                await store.WriteVoicemailAsync(voicemail, cancellationToken).ConfigureAwait(false);
+                foreach (var issue in mediaIssues)
+                {
+                    await WriteWarningAsync(issue).ConfigureAwait(false);
+                }
             }
         }
 
         ReportProgress(new ImportProgress(ImportProgressStage.Finalizing, voiceHtmlItems.Length, voiceHtmlItems.Length, "Finalizing local database and report"));
         var finishedAt = DateTimeOffset.UtcNow;
         var unsupported = issues
-            .Where(item => item.Code == "unsupported_message_page")
+            .Where(item => item.Code.StartsWith("unsupported_", StringComparison.Ordinal))
             .GroupBy(item => item.Code, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => (long)group.Count(), StringComparer.Ordinal);
         var report = new ImportReport(
@@ -187,7 +246,16 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
             startedAt,
             finishedAt,
             scanReport.FilesScanned,
-            new ImportRecordCounts(messagesParsed, conversationsParsed, attachmentsParsed, sourceFiles.Length),
+            new ImportRecordCounts(
+                messagesParsed,
+                conversationsParsed,
+                attachmentsParsed,
+                sourceFiles.Length,
+                callsParsed,
+                voicemailsParsed,
+                mediaReferencesParsed,
+                mediaReferencesMatched,
+                mediaReferencesUnresolved),
             recordsSkipped,
             issues.LongCount(issue => issue.Severity == ImportIssueSeverity.Warning),
             errors,
@@ -196,6 +264,84 @@ public sealed class TakeoutImportService(ITakeoutImportStoreFactory storeFactory
         await store.CompleteAsync(report, cancellationToken).ConfigureAwait(false);
         ReportProgress(new ImportProgress(ImportProgressStage.Completed, voiceHtmlItems.Length, voiceHtmlItems.Length, "Import complete"));
         return report;
+
+        async ValueTask WriteWarningAsync(ImportIssue issue)
+        {
+            var issueRecord = new ImportIssueRecord(issue, ImportIssueSeverity.Warning);
+            issues.Add(issueRecord);
+            await store.WriteIssueAsync(issueRecord, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static CallRecord ResolveMediaReferences(
+        CallRecord call,
+        AttachmentReferenceMatcher matcher,
+        out IReadOnlyList<ImportIssue> issues)
+    {
+        var resolved = ResolveReferences(call.MediaReferences ?? [], call.SourceRelativePath, matcher, "call", out var localIssues);
+        issues = localIssues;
+        return call with { MediaReferences = resolved };
+    }
+
+    private static Voicemail ResolveMediaReferences(
+        Voicemail voicemail,
+        AttachmentReferenceMatcher matcher,
+        out IReadOnlyList<ImportIssue> issues)
+    {
+        var resolved = ResolveReferences(voicemail.MediaReferences ?? [], voicemail.SourceRelativePath, matcher, "voicemail", out var localIssues);
+        issues = localIssues;
+        var audio = resolved.FirstOrDefault(reference => reference.MediaType == "audio");
+        var status = audio is null
+            ? "missing_reference"
+            : audio.MatchStatus;
+        return voicemail with
+        {
+            AudioReference = audio?.RawReference,
+            MatchedAudioRelativePath = audio?.MatchedRelativePath,
+            AudioMatchStatus = status,
+            MediaReferences = resolved
+        };
+    }
+
+    private static IReadOnlyList<MediaReference> ResolveReferences(
+        IReadOnlyList<MediaReference> references,
+        string sourceRelativePath,
+        AttachmentReferenceMatcher matcher,
+        string recordKind,
+        out IReadOnlyList<ImportIssue> issues)
+    {
+        var resolved = new MediaReference[references.Count];
+        var localIssues = new List<ImportIssue>();
+        for (var index = 0; index < references.Count; index++)
+        {
+            var reference = references[index];
+            var match = matcher.Match(
+                new Attachment(reference.RawReference, reference.MatchedRelativePath, reference.MediaType),
+                sourceRelativePath,
+                null);
+            var status = match.Attachment.MatchedRelativePath is not null
+                ? "matched"
+                : match.Issue?.Code == "attachment_reference_ambiguous" ? "ambiguous" : "unresolved";
+            resolved[index] = reference with
+            {
+                MatchedRelativePath = match.Attachment.MatchedRelativePath,
+                MediaType = match.Attachment.MediaType,
+                MatchStatus = status
+            };
+
+            if (match.Issue is not null)
+            {
+                localIssues.Add(new ImportIssue(
+                    $"{recordKind}_media_reference_{status}",
+                    status == "ambiguous"
+                        ? "The event media reference matches multiple source files and was left unresolved."
+                        : "The event media reference did not match a source media file and was left unresolved.",
+                    sourceRelativePath));
+            }
+        }
+
+        issues = localIssues;
+        return resolved;
     }
 
     private void ReportProgress(ImportProgress progress) => ProgressChanged?.Invoke(this, progress);

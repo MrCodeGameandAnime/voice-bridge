@@ -134,7 +134,11 @@ internal static class Program
         Console.Out.WriteLine("Import complete.");
         WriteCount(Console.Out, "Conversations", report.RecordsParsed.Conversations);
         WriteCount(Console.Out, "Messages", report.RecordsParsed.Messages);
+        WriteCount(Console.Out, "Calls", report.RecordsParsed.Calls);
+        WriteCount(Console.Out, "Voicemails", report.RecordsParsed.Voicemails);
         WriteCount(Console.Out, "Attachments", report.RecordsParsed.Attachments);
+        WriteCount(Console.Out, "Media references matched", report.RecordsParsed.MatchedMediaReferences);
+        WriteCount(Console.Out, "Media references unresolved", report.RecordsParsed.UnresolvedMediaReferences);
         WriteCount(Console.Out, "Warnings", report.Warnings);
         WriteCount(Console.Out, "Errors", report.Errors);
         Console.Out.WriteLine();
@@ -170,6 +174,8 @@ internal static class Program
         Console.Out.WriteLine($"{format} export complete.");
         WriteCount(Console.Out, "Conversations", summary.Conversations);
         WriteCount(Console.Out, "Messages", summary.Messages);
+        WriteCount(Console.Out, "Calls", summary.Calls);
+        WriteCount(Console.Out, "Voicemails", summary.Voicemails);
         WriteCount(Console.Out, "Attachments", summary.Attachments);
         WriteCount(Console.Out, "Media copied", summary.MediaCopied);
         WriteCount(Console.Out, "Media unavailable", summary.MediaUnavailable);

@@ -72,3 +72,58 @@ public sealed record StoredSearchMessage(
     string? ConversationLabel,
     string? SenderDisplayName,
     string? SenderPhoneNumber);
+
+public sealed record StoredMediaReference(
+    long Id,
+    long ParentId,
+    string RawReference,
+    long? MatchedSourceFileId,
+    string? MatchedRelativePath,
+    string? MediaType,
+    string MatchStatus);
+
+public sealed record StoredCallRecord(
+    long Id,
+    long? SourceFileId,
+    string SourceRelativePath,
+    string? RawEventType,
+    string? RawTimestamp,
+    string? TimestampUtc,
+    string? RawContact,
+    string? RawFilenameContact,
+    string? RawContactSource,
+    string? RawPhoneNumber,
+    string? RawDurationTitle,
+    string? DurationDisplayText,
+    double? DurationSeconds,
+    IReadOnlyList<StoredMediaReference> MediaReferences);
+
+public sealed record StoredVoicemail(
+    long Id,
+    long? SourceFileId,
+    string SourceRelativePath,
+    string? RawTimestamp,
+    string? TimestampUtc,
+    string? RawContact,
+    string? RawFilenameContact,
+    string? RawContactSource,
+    string? RawPhoneNumber,
+    string? Transcript,
+    string? RawDurationTitle,
+    string? DurationDisplayText,
+    double? DurationSeconds,
+    string? AudioReference,
+    long? MatchedAudioSourceFileId,
+    string? MatchedAudioRelativePath,
+    string AudioMatchStatus,
+    IReadOnlyList<StoredMediaReference> MediaReferences);
+
+public sealed record StoredSearchEvent(
+    string RecordType,
+    long RecordId,
+    string? TimestampUtc,
+    string? Label,
+    string? Contact,
+    string? FilenameContact,
+    string? PhoneNumber,
+    string? Body);

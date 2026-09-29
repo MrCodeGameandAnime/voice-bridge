@@ -31,7 +31,12 @@ public sealed record ImportRecordCounts(
     long Messages,
     long Conversations,
     long Attachments,
-    long SourceFiles);
+    long SourceFiles,
+    long Calls = 0,
+    long Voicemails = 0,
+    long MediaReferences = 0,
+    long MatchedMediaReferences = 0,
+    long UnresolvedMediaReferences = 0);
 
 public sealed record ImportReport(
     ImportInputIdentity InputIdentity,

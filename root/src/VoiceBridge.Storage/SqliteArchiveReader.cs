@@ -7,6 +7,7 @@ public sealed class SqliteArchiveReader : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly bool _sourceFilesHaveContentHash;
+    private readonly bool _hasEventTables;
 
     public SqliteArchiveReader(string databasePath)
     {
@@ -19,6 +20,7 @@ public sealed class SqliteArchiveReader : IDisposable
         }.ToString());
         _connection.Open();
         _sourceFilesHaveContentHash = HasColumn("source_files", "content_sha256");
+        _hasEventTables = HasTable("call_records") && HasTable("voicemails");
     }
 
     public StoredArchiveMetadata ReadArchiveMetadata()
@@ -226,10 +228,13 @@ public sealed class SqliteArchiveReader : IDisposable
 
     public IReadOnlyList<StoredSourceFile> ReadMatchedMediaFiles()
     {
+        var references = _hasEventTables
+            ? "SELECT matched_source_file_id FROM attachments UNION SELECT matched_source_file_id FROM call_media_references UNION SELECT matched_source_file_id FROM voicemail_media_references"
+            : "SELECT matched_source_file_id FROM attachments";
         using var command = CreateCommand($"""
             SELECT DISTINCT sf.id, sf.ordinal, sf.relative_path, sf.size_bytes, sf.media_type, {(_sourceFilesHaveContentHash ? "sf.content_sha256" : "NULL")}
             FROM source_files sf
-            INNER JOIN attachments a ON a.matched_source_file_id = sf.id
+            WHERE sf.id IN ({references})
             ORDER BY sf.id;
             """);
         using var reader = command.ExecuteReader();
@@ -246,6 +251,226 @@ public sealed class SqliteArchiveReader : IDisposable
         }
 
         return records;
+    }
+
+    public IReadOnlyList<StoredCallRecord> ReadCalls()
+    {
+        if (!_hasEventTables)
+        {
+            return [];
+        }
+
+        using var command = CreateCommand("""
+            SELECT c.id, c.source_file_id, c.source_relative_path, c.raw_event_type, c.raw_timestamp, c.timestamp_utc,
+                   c.raw_contact, c.raw_filename_contact, c.raw_contact_source, c.raw_phone_number, c.raw_duration_title, c.duration_display_text, c.duration_seconds,
+                   m.id, m.raw_reference, m.matched_source_file_id, m.matched_relative_path, m.media_type, m.match_status
+            FROM call_records c
+            LEFT JOIN call_media_references m ON m.call_record_id = c.id
+            ORDER BY (c.timestamp_utc IS NULL), c.timestamp_utc, c.id, m.ordinal;
+            """);
+        using var reader = command.ExecuteReader();
+        var calls = new List<StoredCallRecord>();
+        long? currentId = null;
+        long? sourceFileId = null;
+        string sourcePath = string.Empty;
+        string? eventType = null;
+        string? rawTimestamp = null;
+        string? timestampUtc = null;
+        string? contact = null;
+        string? filenameContact = null;
+        string? contactSource = null;
+        string? phone = null;
+        string? rawDurationTitle = null;
+        string? durationText = null;
+        double? durationSeconds = null;
+        List<StoredMediaReference>? mediaReferences = null;
+
+        void Flush()
+        {
+            if (currentId is not null)
+            {
+                calls.Add(new StoredCallRecord(
+                    currentId.Value,
+                    sourceFileId,
+                    sourcePath,
+                    eventType,
+                    rawTimestamp,
+                    timestampUtc,
+                    contact,
+                    filenameContact,
+                    contactSource,
+                    phone,
+                    rawDurationTitle,
+                    durationText,
+                    durationSeconds,
+                    mediaReferences!.ToArray()));
+            }
+        }
+
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            if (currentId != id)
+            {
+                Flush();
+                currentId = id;
+                sourceFileId = GetNullableInt64(reader, 1);
+                sourcePath = reader.GetString(2);
+                eventType = GetNullableString(reader, 3);
+                rawTimestamp = GetNullableString(reader, 4);
+                timestampUtc = GetNullableString(reader, 5);
+                contact = GetNullableString(reader, 6);
+                filenameContact = GetNullableString(reader, 7);
+                contactSource = GetNullableString(reader, 8);
+                phone = GetNullableString(reader, 9);
+                rawDurationTitle = GetNullableString(reader, 10);
+                durationText = GetNullableString(reader, 11);
+                durationSeconds = GetNullableDouble(reader, 12);
+                mediaReferences = [];
+            }
+
+            if (!reader.IsDBNull(13))
+            {
+                mediaReferences!.Add(new StoredMediaReference(
+                    reader.GetInt64(13), id, reader.GetString(14), GetNullableInt64(reader, 15),
+                    GetNullableString(reader, 16), GetNullableString(reader, 17), reader.GetString(18)));
+            }
+        }
+
+        Flush();
+        return calls;
+    }
+
+    public IReadOnlyList<StoredVoicemail> ReadVoicemails()
+    {
+        if (!_hasEventTables)
+        {
+            return [];
+        }
+
+        using var command = CreateCommand("""
+            SELECT v.id, v.source_file_id, v.source_relative_path, v.raw_timestamp, v.timestamp_utc,
+                   v.raw_contact, v.raw_filename_contact, v.raw_contact_source, v.raw_phone_number, v.transcript, v.raw_duration_title, v.duration_display_text,
+                   v.duration_seconds, v.audio_reference, v.matched_audio_source_file_id, v.matched_audio_relative_path,
+                   v.audio_match_status, m.id, m.raw_reference, m.matched_source_file_id, m.matched_relative_path, m.media_type, m.match_status
+            FROM voicemails v
+            LEFT JOIN voicemail_media_references m ON m.voicemail_id = v.id
+            ORDER BY (v.timestamp_utc IS NULL), v.timestamp_utc, v.id, m.ordinal;
+            """);
+        using var reader = command.ExecuteReader();
+        var voicemails = new List<StoredVoicemail>();
+        long? currentId = null;
+        long? sourceFileId = null;
+        string sourcePath = string.Empty;
+        string? rawTimestamp = null;
+        string? timestampUtc = null;
+        string? contact = null;
+        string? filenameContact = null;
+        string? contactSource = null;
+        string? phone = null;
+        string? transcript = null;
+        string? rawDurationTitle = null;
+        string? durationText = null;
+        double? durationSeconds = null;
+        string? audioReference = null;
+        long? matchedAudioSourceFileId = null;
+        string? matchedAudioRelativePath = null;
+        string audioMatchStatus = "missing_reference";
+        List<StoredMediaReference>? mediaReferences = null;
+
+        void Flush()
+        {
+            if (currentId is not null)
+            {
+                voicemails.Add(new StoredVoicemail(
+                    currentId.Value,
+                    sourceFileId,
+                    sourcePath,
+                    rawTimestamp,
+                    timestampUtc,
+                    contact,
+                    filenameContact,
+                    contactSource,
+                    phone,
+                    transcript,
+                    rawDurationTitle,
+                    durationText,
+                    durationSeconds,
+                    audioReference,
+                    matchedAudioSourceFileId,
+                    matchedAudioRelativePath,
+                    audioMatchStatus,
+                    mediaReferences!.ToArray()));
+            }
+        }
+
+        while (reader.Read())
+        {
+            var id = reader.GetInt64(0);
+            if (currentId != id)
+            {
+                Flush();
+                currentId = id;
+                sourceFileId = GetNullableInt64(reader, 1);
+                sourcePath = reader.GetString(2);
+                rawTimestamp = GetNullableString(reader, 3);
+                timestampUtc = GetNullableString(reader, 4);
+                contact = GetNullableString(reader, 5);
+                filenameContact = GetNullableString(reader, 6);
+                contactSource = GetNullableString(reader, 7);
+                phone = GetNullableString(reader, 8);
+                transcript = GetNullableString(reader, 9);
+                rawDurationTitle = GetNullableString(reader, 10);
+                durationText = GetNullableString(reader, 11);
+                durationSeconds = GetNullableDouble(reader, 12);
+                audioReference = GetNullableString(reader, 13);
+                matchedAudioSourceFileId = GetNullableInt64(reader, 14);
+                matchedAudioRelativePath = GetNullableString(reader, 15);
+                audioMatchStatus = reader.GetString(16);
+                mediaReferences = [];
+            }
+
+            if (!reader.IsDBNull(17))
+            {
+                mediaReferences!.Add(new StoredMediaReference(
+                    reader.GetInt64(17), id, reader.GetString(18), GetNullableInt64(reader, 19),
+                    GetNullableString(reader, 20), GetNullableString(reader, 21), reader.GetString(22)));
+            }
+        }
+
+        Flush();
+        return voicemails;
+    }
+
+    public IEnumerable<StoredSearchEvent> ReadSearchEvents()
+    {
+        if (!_hasEventTables)
+        {
+            yield break;
+        }
+
+        using var command = CreateCommand("""
+            SELECT 'call', id, timestamp_utc, raw_event_type, raw_contact, raw_filename_contact, raw_phone_number,
+                   NULL
+            FROM call_records
+            UNION ALL
+            SELECT 'voicemail', id, timestamp_utc, 'Voicemail', raw_contact, raw_filename_contact, raw_phone_number, transcript
+            FROM voicemails
+            ORDER BY 3, 1, 2;
+            """);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            yield return new StoredSearchEvent(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                GetNullableString(reader, 2),
+                GetNullableString(reader, 3),
+                GetNullableString(reader, 4),
+                GetNullableString(reader, 5),
+                GetNullableString(reader, 6),
+                GetNullableString(reader, 7));
+        }
     }
 
     public IEnumerable<StoredImportIssue> ReadImportIssues()
@@ -315,7 +540,15 @@ public sealed class SqliteArchiveReader : IDisposable
         return false;
     }
 
+    private bool HasTable(string tableName)
+    {
+        using var command = CreateCommand("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name LIMIT 1;");
+        command.Parameters.AddWithValue("$name", tableName);
+        return command.ExecuteScalar() is not null;
+    }
+
     private static string? GetNullableString(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     private static long? GetNullableInt64(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     private static int? GetNullableInt32(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+    private static double? GetNullableDouble(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
 }
