@@ -189,6 +189,25 @@ public sealed class ConversationReconstructorTests
         Assert.Contains(result.Issues, issue => issue.Code == "attachment_reference_ambiguous");
     }
 
+    [Fact]
+    public void DoesNotResolveRelativeAttachmentThatTraversesAboveArchiveRoot()
+    {
+        const string html = """
+            <div class="message"><abbr class="dt" title="2024-02-01T10:00:00+00:00"></abbr><a class="tel" href="tel:+15551234567">Alex</a><q>Photo</q><img src="../../../../unrelated.jpg"></div>
+            """;
+        var parser = new VoiceMessageParser();
+        var page = parser.Parse(html, "Takeout/Voice/Calls/Alex - Text - 2024-02-01T10_00_00Z.html");
+        var reconstructor = new ConversationReconstructor([new SourceFile("unrelated.jpg", 10, "image")]);
+
+        var result = reconstructor.Reconstruct(page);
+
+        var conversation = Assert.IsType<Conversation>(result.Conversation);
+        var attachment = Assert.Single(conversation.Messages[0].AttachmentReferences!);
+        Assert.Equal("../../../../unrelated.jpg", attachment.RawReference);
+        Assert.Null(attachment.MatchedRelativePath);
+        Assert.Contains(result.Issues, issue => issue.Code == "attachment_reference_unresolved");
+    }
+
     private static string ReadFixture(string name) =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Voice", name));
 }

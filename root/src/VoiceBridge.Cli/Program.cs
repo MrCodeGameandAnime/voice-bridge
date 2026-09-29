@@ -2,7 +2,9 @@ using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using VoiceBridge.Core.Importing;
 using VoiceBridge.Core.Scanning;
+using VoiceBridge.Storage;
 
 namespace VoiceBridge.Cli;
 
@@ -35,8 +37,18 @@ internal static class Program
         }
         catch (OperationCanceledException)
         {
-            Console.Error.WriteLine("Scan cancelled.");
+            Console.Error.WriteLine("Operation cancelled.");
             return 130;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 1;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Import failed: {exception.Message}");
+            return 1;
         }
         finally
         {
@@ -59,8 +71,70 @@ internal static class Program
             return RunScan(args, cancellationToken, logger);
         }
 
+        if (args[0].Equals("import", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunImport(args, cancellationToken, logger);
+        }
+
         logger.LogError("This command is not available yet. Run 'voicebridge --help' for usage.");
         return 2;
+    }
+
+    private static int RunImport(string[] args, CancellationToken cancellationToken, ILogger logger)
+    {
+        if (args.Length != 4 || !args[2].Equals("--output", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogError("Usage: voicebridge import <source> --output <directory>");
+            return 2;
+        }
+
+        var sourcePath = Path.GetFullPath(args[1]);
+        var outputDirectory = Path.GetFullPath(args[3]);
+        SourceOutputPathValidator.EnsureOutputOutsideDirectorySource(sourcePath, outputDirectory);
+
+        Directory.CreateDirectory(outputDirectory);
+        var databasePath = Path.Combine(outputDirectory, "voicebridge.db");
+        var reportPath = Path.Combine(outputDirectory, "import-report.json");
+        if (File.Exists(databasePath) || File.Exists(reportPath))
+        {
+            logger.LogError("An import database or report already exists in the output directory. Choose a new output directory.");
+            return 1;
+        }
+
+        var service = new TakeoutImportService(new SqliteTakeoutImportStoreFactory());
+        service.ProgressChanged += (_, progress) =>
+        {
+            if (progress.Stage == ImportProgressStage.ProcessingMessages)
+            {
+                var processed = progress.Completed + 1;
+                if (progress.Completed == 0 || processed % 500 == 0 || processed == progress.Total)
+                {
+                    Console.Out.WriteLine(progress.Message);
+                }
+            }
+            else
+            {
+                Console.Out.WriteLine($"{progress.Message}...");
+            }
+        };
+
+        var report = service.ImportAsync(sourcePath, databasePath, cancellationToken).GetAwaiter().GetResult();
+        using (var reportStream = new FileStream(reportPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            JsonSerializer.Serialize(reportStream, report, JsonOptions);
+        }
+
+        Console.Out.WriteLine();
+        Console.Out.WriteLine("Import complete.");
+        WriteCount(Console.Out, "Conversations", report.RecordsParsed.Conversations);
+        WriteCount(Console.Out, "Messages", report.RecordsParsed.Messages);
+        WriteCount(Console.Out, "Attachments", report.RecordsParsed.Attachments);
+        WriteCount(Console.Out, "Warnings", report.Warnings);
+        WriteCount(Console.Out, "Errors", report.Errors);
+        Console.Out.WriteLine();
+        Console.Out.WriteLine($"Database: {databasePath}");
+        Console.Out.WriteLine($"Report:   {reportPath}");
+        return 0;
     }
 
     private static int RunScan(string[] args, CancellationToken cancellationToken, ILogger logger)
@@ -121,10 +195,12 @@ internal static class Program
         output.WriteLine();
         output.WriteLine("Usage:");
         output.WriteLine("  voicebridge scan <source> [--json]");
+        output.WriteLine("  voicebridge import <source> --output <directory>");
         output.WriteLine("  voicebridge --help");
         output.WriteLine();
         output.WriteLine("Commands:");
         output.WriteLine("  scan          Inventory a ZIP archive or extracted Takeout directory.");
+        output.WriteLine("  import        Create a local SQLite archive and import report.");
         output.WriteLine();
         output.WriteLine("Options:");
         output.WriteLine("  --json        Write a machine-readable scan report to standard output.");

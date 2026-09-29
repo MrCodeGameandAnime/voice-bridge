@@ -45,11 +45,17 @@ internal sealed class AttachmentReferenceMatcher
             return (attachment, null);
         }
 
-        var referencePath = ResolveRelativeReference(sourceRelativePath, attachment.RawReference);
-        var candidates = referencePath is not null
+        var referencePath = ResolveRelativeReference(
+            sourceRelativePath,
+            attachment.RawReference,
+            out var traversesAboveArchiveRoot);
+        var candidates = !traversesAboveArchiveRoot
+            && referencePath is not null
             && _pathsByRelativePath.TryGetValue(referencePath, out var exactMatches)
                 ? exactMatches
-                : FindFallbackCandidates(attachment.RawReference);
+                : traversesAboveArchiveRoot
+                    ? null
+                    : FindFallbackCandidates(attachment.RawReference);
 
         if (candidates is { Count: 1 })
         {
@@ -98,8 +104,12 @@ internal sealed class AttachmentReferenceMatcher
         return _pathsByExtensionlessStem.TryGetValue(stem, out var stemMatches) ? stemMatches : null;
     }
 
-    private static string? ResolveRelativeReference(string sourceRelativePath, string rawReference)
+    private static string? ResolveRelativeReference(
+        string sourceRelativePath,
+        string rawReference,
+        out bool traversesAboveArchiveRoot)
     {
+        traversesAboveArchiveRoot = false;
         var cleanReference = StripQueryAndFragment(rawReference);
         if (string.IsNullOrWhiteSpace(cleanReference))
         {
@@ -136,11 +146,13 @@ internal sealed class AttachmentReferenceMatcher
 
             if (part == "..")
             {
-                if (pathParts.Count > 0)
+                if (pathParts.Count == 0)
                 {
-                    pathParts.RemoveAt(pathParts.Count - 1);
+                    traversesAboveArchiveRoot = true;
+                    return null;
                 }
 
+                pathParts.RemoveAt(pathParts.Count - 1);
                 continue;
             }
 
