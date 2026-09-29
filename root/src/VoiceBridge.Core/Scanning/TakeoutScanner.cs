@@ -23,7 +23,6 @@ public sealed class TakeoutScanner
     };
 
     private static readonly string[] CallEventLabels = ["Placed", "Received", "Missed", "Recorded"];
-    private static readonly string[] VoiceHtmlLabels = ["Text", "Voicemail", .. CallEventLabels];
     private static readonly uint[] Crc32Table = CreateCrc32Table();
 
     public Result<ScanReport> Scan(string sourcePath, CancellationToken cancellationToken = default)
@@ -220,11 +219,11 @@ public sealed class TakeoutScanner
 
         public bool VoiceContentFound { get; private set; }
         public long FilesScanned { get; private set; }
-        public long CandidateMessageFiles { get; private set; }
-        public long CandidateAttachments { get; private set; }
-        public long CandidateVoicemailMediaFiles { get; private set; }
-        public long VoicemailPages { get; private set; }
-        public long CallEventPages { get; private set; }
+        public long CandidateMessagePages { get; private set; }
+        public long CandidateImageVideoMediaFiles { get; private set; }
+        public long CandidateAudioMediaFiles { get; private set; }
+        public long CandidateVoicemailPages { get; private set; }
+        public long CandidateCallEventPages { get; private set; }
         public long OtherVoiceFiles { get; private set; }
         public long UnknownFiles { get; private set; }
 
@@ -266,13 +265,13 @@ public sealed class TakeoutScanner
 
             if (ImageExtensions.Contains(extension) || VideoExtensions.Contains(extension))
             {
-                CandidateAttachments++;
+                CandidateImageVideoMediaFiles++;
                 return;
             }
 
             if (AudioExtensions.Contains(extension))
             {
-                CandidateVoicemailMediaFiles++;
+                CandidateAudioMediaFiles++;
                 return;
             }
 
@@ -320,11 +319,11 @@ public sealed class TakeoutScanner
                 _sourceKind,
                 VoiceContentFound,
                 FilesScanned,
-                CandidateMessageFiles,
-                CandidateAttachments,
-                CandidateVoicemailMediaFiles,
-                VoicemailPages,
-                CallEventPages,
+                CandidateMessagePages,
+                CandidateImageVideoMediaFiles,
+                CandidateAudioMediaFiles,
+                CandidateVoicemailPages,
+                CandidateCallEventPages,
                 OtherVoiceFiles,
                 UnknownFiles,
                 warnings);
@@ -332,60 +331,37 @@ public sealed class TakeoutScanner
 
         private void ClassifyHtml(string relativePath, string fileName)
         {
-            if (HasFilenameLabel(fileName, "Text") || fileName.StartsWith("Group Conversation - ", StringComparison.OrdinalIgnoreCase))
+            if (!TryGetHtmlKindAndTimestamp(fileName, out var kind, out var timestamp))
             {
-                WarnIfMalformedTimestamp(relativePath, fileName);
-                CandidateMessageFiles++;
+                UnknownFiles++;
+                _warnings.Add(new ScanWarning(
+                    "unrecognized_voice_html_filename",
+                    "An HTML file under Voice does not have a recognized message or event filename label.",
+                    relativePath));
                 return;
             }
 
-            if (HasFilenameLabel(fileName, "Voicemail"))
+            WarnIfMalformedTimestamp(relativePath, timestamp);
+
+            if (kind.Equals("Text", StringComparison.OrdinalIgnoreCase)
+                || kind.Equals("Group Conversation", StringComparison.OrdinalIgnoreCase))
             {
-                WarnIfMalformedTimestamp(relativePath, fileName);
-                VoicemailPages++;
-                OtherVoiceFiles++;
+                CandidateMessagePages++;
                 return;
             }
 
-            if (CallEventLabels.Any(label => HasFilenameLabel(fileName, label)))
+            if (kind.Equals("Voicemail", StringComparison.OrdinalIgnoreCase))
             {
-                WarnIfMalformedTimestamp(relativePath, fileName);
-                CallEventPages++;
-                OtherVoiceFiles++;
+                CandidateVoicemailPages++;
                 return;
             }
 
-            UnknownFiles++;
-            _warnings.Add(new ScanWarning(
-                "unrecognized_voice_html_filename",
-                "An HTML file under Voice does not have a recognized message or event filename label.",
-                relativePath));
+            CandidateCallEventPages++;
         }
 
-        private void WarnIfMalformedTimestamp(string relativePath, string fileName)
+        private void WarnIfMalformedTimestamp(string relativePath, string timestamp)
         {
-            var nameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
-            string? timestamp = null;
-
-            if (nameWithoutExtension.StartsWith("Group Conversation - ", StringComparison.OrdinalIgnoreCase))
-            {
-                timestamp = nameWithoutExtension["Group Conversation - ".Length..];
-            }
-            else
-            {
-                foreach (var label in VoiceHtmlLabels)
-                {
-                    var marker = $" - {label} - ";
-                    var markerIndex = nameWithoutExtension.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
-                    if (markerIndex >= 0)
-                    {
-                        timestamp = nameWithoutExtension[(markerIndex + marker.Length)..];
-                        break;
-                    }
-                }
-            }
-
-            if (timestamp is not null && !DateTime.TryParseExact(
+            if (!DateTime.TryParseExact(
                     timestamp,
                     "yyyy-MM-dd'T'HH_mm_ss'Z'",
                     CultureInfo.InvariantCulture,
@@ -397,6 +373,47 @@ public sealed class TakeoutScanner
                     "A recognized Voice HTML filename has a malformed timestamp.",
                     relativePath));
             }
+        }
+
+        private static bool TryGetHtmlKindAndTimestamp(string fileName, out string kind, out string timestamp)
+        {
+            var name = Path.GetFileNameWithoutExtension(fileName);
+            var timestampSeparator = name.LastIndexOf(" - ", StringComparison.Ordinal);
+            if (timestampSeparator < 0)
+            {
+                kind = string.Empty;
+                timestamp = string.Empty;
+                return false;
+            }
+
+            var prefix = name[..timestampSeparator];
+            timestamp = name[(timestampSeparator + 3)..];
+            if (prefix.Equals("Group Conversation", StringComparison.OrdinalIgnoreCase))
+            {
+                kind = "Group Conversation";
+                return true;
+            }
+
+            var kindSeparator = prefix.LastIndexOf(" - ", StringComparison.Ordinal);
+            if (kindSeparator < 0)
+            {
+                kind = string.Empty;
+                timestamp = string.Empty;
+                return false;
+            }
+
+            var candidateKind = prefix[(kindSeparator + 3)..];
+            if (!candidateKind.Equals("Text", StringComparison.OrdinalIgnoreCase)
+                && !candidateKind.Equals("Voicemail", StringComparison.OrdinalIgnoreCase)
+                && !CallEventLabels.Contains(candidateKind, StringComparer.OrdinalIgnoreCase))
+            {
+                kind = string.Empty;
+                timestamp = string.Empty;
+                return false;
+            }
+
+            kind = candidateKind;
+            return true;
         }
     }
 
@@ -411,6 +428,4 @@ public sealed class TakeoutScanner
         return segments.Any(segment => segment.Equals("Voice", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool HasFilenameLabel(string fileName, string label) =>
-        fileName.Contains($" - {label} - ", StringComparison.OrdinalIgnoreCase);
 }

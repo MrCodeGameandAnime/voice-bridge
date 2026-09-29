@@ -17,6 +17,7 @@ public sealed class TakeoutScanCliTests
         CreateZip(archivePath,
             ("Takeout/Voice/Calls/Contact - Text - 2024-01-02T03_04_05Z.html", "<html></html>"),
             ("Takeout/Voice/Calls/Contact - Received - 2024-01-02T03_04_05Z.html", "<html></html>"),
+            ("Takeout/Voice/Calls/Contact - Voicemail - 2024-01-02T03_04_05Z.html", "<html></html>"),
             ("Takeout/Voice/Calls/photo.jpg", "image"),
             ("Takeout/Voice/Calls/voicemail.mp3", "audio"),
             ("Takeout/Voice/Phones.vcf", "contact"),
@@ -27,14 +28,15 @@ public sealed class TakeoutScanCliTests
 
         Assert.Equal("zipArchive", report.RootElement.GetProperty("sourceKind").GetString());
         Assert.True(report.RootElement.GetProperty("voiceContentFound").GetBoolean());
-        Assert.Equal(6, report.RootElement.GetProperty("filesScanned").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("candidateMessageFiles").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("candidateAttachments").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("candidateVoicemailMediaFiles").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("callEventPages").GetInt64());
-        Assert.Equal(0, report.RootElement.GetProperty("voicemailPages").GetInt64());
-        Assert.Equal(2, report.RootElement.GetProperty("otherVoiceFiles").GetInt64());
+        Assert.Equal(7, report.RootElement.GetProperty("filesScanned").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateImageVideoMediaFiles").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateAudioMediaFiles").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateCallEventPages").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateVoicemailPages").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("otherVoiceFiles").GetInt64());
         Assert.Equal(1, report.RootElement.GetProperty("unknownFiles").GetInt64());
+        Assert.Equal(7, SumClassifiedFiles(report.RootElement));
         Assert.Equal(originalHash, SHA256.HashData(File.ReadAllBytes(archivePath)));
     }
 
@@ -55,12 +57,14 @@ public sealed class TakeoutScanCliTests
 
         Assert.Equal("directory", report.RootElement.GetProperty("sourceKind").GetString());
         Assert.Equal(5, report.RootElement.GetProperty("filesScanned").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("candidateMessageFiles").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("candidateAttachments").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("candidateVoicemailMediaFiles").GetInt64());
-        Assert.Equal(1, report.RootElement.GetProperty("voicemailPages").GetInt64());
-        Assert.Equal(2, report.RootElement.GetProperty("otherVoiceFiles").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateImageVideoMediaFiles").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateAudioMediaFiles").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateVoicemailPages").GetInt64());
+        Assert.Equal(0, report.RootElement.GetProperty("candidateCallEventPages").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("otherVoiceFiles").GetInt64());
         Assert.Equal(0, report.RootElement.GetProperty("unknownFiles").GetInt64());
+        Assert.Equal(5, SumClassifiedFiles(report.RootElement));
     }
 
     [Fact]
@@ -119,7 +123,7 @@ public sealed class TakeoutScanCliTests
         using var report = RunJson("scan", archivePath, "--json");
 
         Assert.Equal(0, report.RootElement.GetProperty("filesScanned").GetInt64());
-        Assert.Equal(0, report.RootElement.GetProperty("candidateMessageFiles").GetInt64());
+        Assert.Equal(0, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
         Assert.Contains("empty_source", WarningCodes(report));
         Assert.Contains("voice_folder_missing", WarningCodes(report));
     }
@@ -137,7 +141,7 @@ public sealed class TakeoutScanCliTests
 
         Assert.Equal(2, report.RootElement.GetProperty("filesScanned").GetInt64());
         Assert.Equal(2, report.RootElement.GetProperty("unknownFiles").GetInt64());
-        Assert.Equal(0, report.RootElement.GetProperty("candidateMessageFiles").GetInt64());
+        Assert.Equal(0, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
         Assert.False(report.RootElement.GetProperty("voiceContentFound").GetBoolean());
     }
 
@@ -179,7 +183,7 @@ public sealed class TakeoutScanCliTests
         using var report = RunJson("scan", temporary.RootPath, "--json");
 
         Assert.Equal(1, report.RootElement.GetProperty("unknownFiles").GetInt64());
-        Assert.Equal(0, report.RootElement.GetProperty("candidateMessageFiles").GetInt64());
+        Assert.Equal(0, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
         Assert.Contains("unrecognized_voice_html_filename", WarningCodes(report));
     }
 
@@ -193,8 +197,25 @@ public sealed class TakeoutScanCliTests
 
         using var report = RunJson("scan", temporary.RootPath, "--json");
 
-        Assert.Equal(1, report.RootElement.GetProperty("candidateMessageFiles").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
         Assert.Contains("malformed_voice_html_filename", WarningCodes(report));
+    }
+
+    [Fact]
+    public void FilenameKindIsParsedFromRightHandSuffix()
+    {
+        using var temporary = new TemporaryDirectory();
+        var calls = Path.Combine(temporary.RootPath, "Takeout", "Voice", "Calls");
+        Directory.CreateDirectory(calls);
+        File.WriteAllText(
+            Path.Combine(calls, "Contact - Text - birthday - Received - 2024-01-02T03_04_05Z.html"),
+            "<html></html>");
+
+        using var report = RunJson("scan", temporary.RootPath, "--json");
+
+        Assert.Equal(0, report.RootElement.GetProperty("candidateMessagePages").GetInt64());
+        Assert.Equal(1, report.RootElement.GetProperty("candidateCallEventPages").GetInt64());
+        Assert.Equal(1, SumClassifiedFiles(report.RootElement));
     }
 
     [Fact]
@@ -246,6 +267,15 @@ public sealed class TakeoutScanCliTests
         report.RootElement.GetProperty("warnings")
             .EnumerateArray()
             .Select(warning => warning.GetProperty("code").GetString()!);
+
+    private static long SumClassifiedFiles(JsonElement report) =>
+        report.GetProperty("candidateMessagePages").GetInt64()
+        + report.GetProperty("candidateVoicemailPages").GetInt64()
+        + report.GetProperty("candidateCallEventPages").GetInt64()
+        + report.GetProperty("candidateImageVideoMediaFiles").GetInt64()
+        + report.GetProperty("candidateAudioMediaFiles").GetInt64()
+        + report.GetProperty("otherVoiceFiles").GetInt64()
+        + report.GetProperty("unknownFiles").GetInt64();
 
     private static void CreateZip(string path, params (string Name, string Content)[] entries)
     {

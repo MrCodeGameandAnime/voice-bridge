@@ -102,12 +102,12 @@ internal static class Program
             : "No Google Voice export detected");
         output.WriteLine();
         WriteCount(output, "Files scanned", report.FilesScanned);
-        WriteCount(output, "Candidate message files", report.CandidateMessageFiles);
-        WriteCount(output, "Candidate attachments", report.CandidateAttachments);
-        WriteCount(output, "Candidate voicemail media", report.CandidateVoicemailMediaFiles);
-        WriteCount(output, "Voicemail pages", report.VoicemailPages);
-        WriteCount(output, "Call/event pages", report.CallEventPages);
-        WriteCount(output, "Other Voice files", report.OtherVoiceFiles);
+        WriteCount(output, "Candidate message pages", report.CandidateMessagePages);
+        WriteCount(output, "Candidate image/video media", report.CandidateImageVideoMediaFiles);
+        WriteCount(output, "Candidate audio media", report.CandidateAudioMediaFiles);
+        WriteCount(output, "Candidate voicemail pages", report.CandidateVoicemailPages);
+        WriteCount(output, "Candidate call/event pages", report.CandidateCallEventPages);
+        WriteCount(output, "Other recognized Voice files", report.OtherVoiceFiles);
         WriteCount(output, "Unknown files", report.UnknownFiles);
         WriteCount(output, "Warnings", report.Warnings.Count);
     }

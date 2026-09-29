@@ -1,4 +1,5 @@
-takeout-20260929T011333Z-1-001.zip
+/takeout-*.zip
+/Takeout/
 
 # .NET build and test output
 **/bin/
