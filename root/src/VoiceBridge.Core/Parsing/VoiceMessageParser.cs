@@ -158,14 +158,16 @@ public sealed class VoiceMessageParser
     {
         var references = new List<Attachment>();
 
-        foreach (var mediaElement in row.QuerySelectorAll("img, audio, video, source"))
+        foreach (var mediaElement in row.QuerySelectorAll("img, audio, video, source, a.video[href]"))
         {
-            var rawReference = mediaElement.GetAttribute("src");
+            var isVideoLink = mediaElement.LocalName.Equals("a", StringComparison.OrdinalIgnoreCase);
+            var referenceAttribute = isVideoLink ? "href" : "src";
+            var rawReference = mediaElement.GetAttribute(referenceAttribute);
             if (string.IsNullOrWhiteSpace(rawReference))
             {
                 issues.Add(new ImportIssue(
                     "message_attachment_reference_missing",
-                    "A media element in the message row has no src reference.",
+                    "A media element or supported media link in the message row has no source reference.",
                     sourceRelativePath,
                     rowIndex));
                 continue;
@@ -174,7 +176,7 @@ public sealed class VoiceMessageParser
             references.Add(new Attachment(
                 rawReference,
                 MatchedRelativePath: null,
-                GetMediaType(mediaElement)));
+                isVideoLink ? null : GetMediaType(mediaElement)));
         }
 
         return references;

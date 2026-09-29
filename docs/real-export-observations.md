@@ -115,7 +115,7 @@ The 18,732 `div.message` rows all contained a recognized `abbr.dt` timestamp, an
 - **Message pages:** 2,434 `Text`-labelled HTML files contain 18,732 total rows; 18,524 rows are in `Calls/`, and 208 in `Spam/`. Every audited row had timestamp, sender link, and body nodes. There are 12 row shapes, including line breaks, spans, images, audio elements, and video class markers.
 - **Group candidates:** Nine HTML filenames say `Group Conversation` and have no recognized event label. Nine pages across four page shapes have a `participants` class. Separately, 41 `Calls/` pages have at least three distinct `tel:` links: 39 have three and two have four or more. These are overlapping structural clues, not a confirmed group-conversation count or membership model.
 - **MMS/image:** 798 message rows contain an `img` element. 666 rows have an exact `MMS Sent` or `MMS Received` body. These signals overlap, but the scan did not establish that all such rows are equivalent MMS records or that every attachment reference resolves.
-- **Video-like/audio:** 35 rows have a `video` class marker; two of these also have an image. No message row contains a `<video>` element. Two rows contain `<audio>`. A class marker is not proof of an embedded or playable video.
+- **Video-like/audio:** 35 rows have a `video` class marker; two rows also have image markup, and there are three image elements among those rows. No message row contains a `<video>` element. Two rows contain `<audio>`. A class marker alone is not proof of an embedded or playable video.
 
 ### Call/event variants
 
@@ -153,8 +153,9 @@ The archive has zero duplicate full paths under case-insensitive comparison and 
 ### Gate 3 message parser validation
 
 - The DOM-based parser recognized all 2,443 message pages by their `div.message` rows and retained all 18,732 rows. The other 5,181 HTML pages were reported as unsupported by this message-specific parser; they are call/event and voicemail pages. The full pass emitted 5,242 issues: one unsupported-page issue per non-message page and 61 row-scoped sender-phone issues.
-- The parser completed with no exceptions. It emitted 61 `message_sender_phone_missing` issues for empty `tel:` targets and preserved each row's sender display name while leaving its phone number unknown. The remaining 18,671 sender links had non-empty phone values.
+- The parser completed with no exceptions. It emitted 61 `message_sender_phone_missing` issues for empty `tel:` targets and preserved each row's sender display name while leaving its phone number unknown. The remaining 18,671 sender links had non-empty phone values. It retained 973 raw attachment references, including 35 video-anchor references with no inferred media type.
 - Parsed messages retain source-relative path and row index, raw timestamp and parsed offset timestamp when valid, body text, row sender evidence, and raw attachment references. Direction remains unknown; page-level participant links are kept as separate evidence and are not assigned to each row. Attachment references are not resolved to archive files at this gate.
+- Inspection of the 35 video-class rows found one `a.video[href]` per row. The 35 distinct bare-relative targets each matched exactly one archive media file by extensionless stem: 31 `.3gp` and four `.mp4`. The parser now preserves the raw href as an attachment reference while leaving media type and matched path unknown; the class name alone does not determine either value.
 - The source archive SHA-256 remained `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C` after validation. No extraction or source modification occurred.
 
 ## Gate 0 comparison

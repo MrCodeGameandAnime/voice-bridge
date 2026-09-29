@@ -130,6 +130,21 @@ public sealed class MessagePageParserTests
         Assert.Contains(result.Issues, issue => issue.Code == "message_sender_phone_missing");
     }
 
+    [Fact]
+    public void RetainsObservedVideoAnchorReferenceWithoutInferringMediaType()
+    {
+        var parser = new VoiceMessageParser();
+
+        var result = parser.Parse(ReadFixture("video-link-message.html"), "Voice/Calls/video-message.html");
+
+        Assert.Empty(result.Issues);
+        var message = Assert.Single(result.Messages);
+        var attachment = Assert.Single(message.AttachmentReferences!);
+        Assert.Equal("video-reference", attachment.RawReference);
+        Assert.Null(attachment.MediaType);
+        Assert.Null(attachment.MatchedRelativePath);
+    }
+
     private static string ReadFixture(string name) =>
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Voice", name));
 }
