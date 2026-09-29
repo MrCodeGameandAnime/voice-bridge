@@ -1,8 +1,8 @@
 # Real Google Voice Takeout observations
 
-**Gate:** 0.5 — real export validation  
-**Result:** Inventory and structural audit completed for the one ignored Takeout archive in this repository.  
-**Boundary:** Documentation and read-only archive inspection only. The archive was streamed in place and not extracted or changed. No parser logic was implemented.
+**Gates:** 0.5 — real export validation; 3 — message parser validation
+**Result:** Inventory and structural audit completed for the one ignored Takeout archive in this repository; the Gate 3 message parser was also validated against its message pages.
+**Boundary:** The archive was streamed in place and not extracted or changed. Gate 0.5 was documentation and read-only inspection; parser behavior and its limits are recorded separately below.
 
 ## Archive scale
 
@@ -92,7 +92,7 @@ There are 33 distinct page-level signatures. Feature names in the table summariz
 
 ### Message row shapes and fields
 
-The 18,732 `div.message` rows all contained a recognized `abbr.dt` timestamp, a `tel:` link, and a `q` body. All row timestamps used an ISO-like representation with a numeric offset. Counts below are row counts, and the differences reflect observed tag/attribute/class structure rather than a semantic message type.
+The 18,732 `div.message` rows all contained a recognized `abbr.dt` timestamp, an `a.tel` sender element, and a `q` body. All row timestamps used an ISO-like representation with a numeric offset. Sixty-one sender elements had an empty `tel:` target; the Gate 3 parser retained the rows and reported those missing phone values. Counts below are row counts, and the differences reflect observed tag/attribute/class structure rather than a semantic message type.
 
 | Shape ID | Rows | Additional observed structure beyond the common row |
 |---|---:|---|
@@ -149,6 +149,13 @@ The archive has zero duplicate full paths under case-insensitive comparison and 
 - **Malformed records:** No ZIP read/CRC failure, HTML page without an `html` root, UTF-8 replacement character, or message row missing one of the audited timestamp, `tel:` link, or body elements was detected. The standard-library HTML parser is tolerant, so strict syntax conformance was not checked. Missing transcript/audio nodes and recording-error markers are observed optional-field anomalies, not automatically malformed records.
 - **Unknown file types:** No unknown extensions occurred. The complete extension set is `.html`, `.jpg`, `.mp3`, `.gif`, `.3gp`, `.mp4`, `.vcf`, and `.amr`. VCF file contents were not opened or classified beyond extension and path.
 - **Unusual structures:** Nine group-named message pages lack a recognized filename event token; 100 voicemail pages lack transcript spans; one voicemail page lacks audio; 35 message rows have a video class but no video element; two audio message rows and two recording-error markers warrant future fixture-level review.
+
+### Gate 3 message parser validation
+
+- The DOM-based parser recognized all 2,443 message pages by their `div.message` rows and retained all 18,732 rows. The other 5,181 HTML pages were reported as unsupported by this message-specific parser; they are call/event and voicemail pages. The full pass emitted 5,242 issues: one unsupported-page issue per non-message page and 61 row-scoped sender-phone issues.
+- The parser completed with no exceptions. It emitted 61 `message_sender_phone_missing` issues for empty `tel:` targets and preserved each row's sender display name while leaving its phone number unknown. The remaining 18,671 sender links had non-empty phone values.
+- Parsed messages retain source-relative path and row index, raw timestamp and parsed offset timestamp when valid, body text, row sender evidence, and raw attachment references. Direction remains unknown; page-level participant links are kept as separate evidence and are not assigned to each row. Attachment references are not resolved to archive files at this gate.
+- The source archive SHA-256 remained `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C` after validation. No extraction or source modification occurred.
 
 ## Gate 0 comparison
 

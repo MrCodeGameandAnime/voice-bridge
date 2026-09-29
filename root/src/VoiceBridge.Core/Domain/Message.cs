@@ -12,4 +12,6 @@ public sealed record Message(
     DateTimeOffset? Timestamp,
     string? Body,
     Participant? Sender,
-    MessageDirection? Direction);
+    MessageDirection? Direction,
+    int? SourceRowIndex = null,
+    IReadOnlyList<Attachment>? AttachmentReferences = null);

@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Fixtures\Voice\**\*.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\VoiceBridge.Core\VoiceBridge.Core.csproj" />
     <ProjectReference Include="..\..\src\VoiceBridge.Storage\VoiceBridge.Storage.csproj" />
     <ProjectReference Include="..\..\src\VoiceBridge.Export\VoiceBridge.Export.csproj" />

@@ -1,8 +1,8 @@
 # Google Voice Takeout format reconnaissance
 
-**Gates:** 0 — format reconnaissance; 0.5 — real export validation  
-**Status:** Gate 0.5 inventory completed against the ignored real export in this repository.  
-**Scope:** Evidence and inventory only. The source archive was read in place, not modified or extracted. No parser code or real-export parser support is claimed.
+**Gates:** 0 — format reconnaissance; 0.5 — real export validation; 3 — message parser validation
+**Status:** Gate 0.5 inventory and Gate 3 message parser validation completed against the ignored real export in this repository.
+**Scope:** Gate 0/0.5 record the format evidence and inventory; Gate 3 adds a message-page parser validated against this one export. The source archive was read in place, not modified or extracted. Parser validation is evidence about this sample, not a general Google format contract.
 
 ## Findings at a glance
 
@@ -10,7 +10,7 @@ Google officially says Voice exports can include call logs, text messages, voice
 
 Public parser documentation and user reports commonly show the data under `Takeout/Voice/Calls/`, with HTML files for text conversations and call-related events, plus referenced media files. This is useful reconnaissance, not a stable Google format contract. [S3][S4][S5][S6]
 
-The real archive now confirms that layout for this export and adds sibling `Spam/` and `Phones.vcf` entries. It contains 8,946 files, including 7,624 HTML records and 1,319 media files. The full content-free inventory and shape catalogue are in [real-export-observations.md](real-export-observations.md). This validates one export only; it is not a Google format contract or a claim that VoiceBridge parses it.
+The real archive now confirms that layout for this export and adds sibling `Spam/` and `Phones.vcf` entries. It contains 8,946 files, including 7,624 HTML records and 1,319 media files. The full content-free inventory and shape catalogue are in [real-export-observations.md](real-export-observations.md). Gate 3's message-page parser recognizes the 2,443 message pages and preserves all 18,732 rows, with 61 row-scoped issues for empty `tel:` values. This validates one export only; it is not a Google format contract.
 
 ## Evidence levels
 
@@ -68,7 +68,7 @@ The following selectors were found in historical parser references and confirmed
 
 | Content | Historical DOM observation | Important caveat |
 |---|---|---|
-| Text message rows | `div.message`; a row may contain `abbr.dt` with a `title` timestamp, an `a.tel` sender, and a `q` body. | This parser version's selectors have produced null-node errors; an older implementation also struggled with group messages. Revalidate against current export HTML. [S3] |
+| Text message rows | `div.message`; a row may contain `abbr.dt` with a `title` timestamp, an `a.tel` sender, and a `q` body. | Historical parser versions reported null-node errors and group-message problems. Gate 3 parsed the message rows in this archive, retaining malformed rows as partial messages with issues. [S3] |
 | Call/event time | `abbr.published` with a `title` attribute. | The parser author explicitly recorded a timestamp-format change in 2015. [S3] |
 | Call contact/number | `a.tel`, with visible contact text and a `tel:` link. | Contact names and number availability vary; retain the original string and do not normalize destructively. [S3][S5] |
 | Call duration | `abbr.duration` in some call records. | Reported absent for missed calls and some recorded events. [S3] |
@@ -78,7 +78,7 @@ The following selectors were found in historical parser references and confirmed
 
 The historical parser's sent/received inference from the visible name `Me` is not reliable enough to copy as a rule. Direction must be recorded as unknown unless the source evidence supports it for the specific format/version. [S3]
 
-In this archive, every one of the 18,732 `div.message` rows has a recognized `abbr.dt` timestamp, a `tel:` sender link, and a `q` body. All observed message and call/event timestamp values use an ISO-like numeric-offset form. There are 798 message rows with an `img` element, 35 with a `video` class marker (none with a `<video>` element), two with an `audio` element, and 666 exact `MMS Sent`/`MMS Received` placeholder bodies. These counts describe this export only.
+In this archive, every one of the 18,732 `div.message` rows has a recognized `abbr.dt` timestamp, an `a.tel` sender element, and a `q` body. Sixty-one sender elements have an empty `tel:` target; Gate 3 preserves the display name, leaves the phone number unknown, and reports a row-scoped issue for each. All observed message and call/event timestamp values use an ISO-like numeric-offset form. There are 798 message rows with an `img` element, 35 with a `video` class marker (none with a `<video>` element), two with an `audio` element, and 666 exact `MMS Sent`/`MMS Received` placeholder bodies. These counts describe this export only.
 
 ## Gate 0.5 real-export validation
 
@@ -88,8 +88,15 @@ In this archive, every one of the 18,732 `div.message` rows has a recognized `ab
 - HTML structures: 33 page-level structural signatures and 12 message-row signatures. The signatures intentionally omit text and attribute values; they are not inferred software-version identifiers. The full tables are in [real-export-observations.md](real-export-observations.md).
 - Message rows: 18,732 total; 18,524 under `Calls/` and 208 under `Spam/`. Call-event labels: 3,030 `Placed`, 1,100 `Received`, and 707 `Missed`. Voicemail labels: 322 under `Calls/` and 22 under `Spam/`.
 - Media: 1,319 files with image/audio/video-container extensions, plus three VCF files. No duplicate full paths or duplicate basenames were found. The extensions present were `.html`, `.jpg`, `.mp3`, `.gif`, `.3gp`, `.mp4`, `.vcf`, and `.amr`; no other file extension was present.
-- Edge cases include nine group-named HTML files without a recognized event label, 100 voicemail pages without a `full-text` class, one voicemail page without an audio element, two `recording-error-message` markers, 38 unresolved local media references, and filenames with empty or unusual contact-label components.
-- This scan validates only the selected archive. It does not establish behavior for other Takeout versions, locales, account types, or split archives, and no parser logic was implemented.
+- Edge cases include nine group-named HTML files without a recognized event label, 100 voicemail pages without a `full-text` class, one voicemail page without an audio element, two `recording-error-message` markers, 38 unresolved local media references, and filenames with empty or unusual contact-label components. The message parser separately found 61 rows whose `tel:` link target is empty.
+- Gate 0.5 itself was an inventory-only scan. Gate 3 subsequently implemented a message-page parser and validated it against the selected archive; this does not establish behavior for other Takeout versions, locales, account types, or split archives.
+
+## Gate 3 message parser validation
+
+- The DOM-based parser recognized 2,443 message pages containing 18,732 `div.message` rows. It reported the other 5,181 HTML pages as unsupported by this message-specific parser; those pages are call/event and voicemail records, not failed message rows. The full pass emitted 5,242 issues: one unsupported-page issue per non-message page, plus 61 row-scoped sender-phone issues.
+- There were no parser exceptions. Sixty-one rows had empty `tel:` targets; these were retained with display-name evidence, null phone numbers, and row-scoped `message_sender_phone_missing` issues. The other 18,671 rows had a non-empty sender phone value.
+- The parser retains raw and parsed offset timestamps, decoded message body text (including line breaks), sender evidence, source path and row index, and raw media references. It does not infer message direction from `Me`, assign page-level participant links to each row, or resolve attachment paths.
+- The source archive SHA-256 remained `DD7E801C1AE833FE30B872501F1B0B28EA0240A4402C886CA8600A449A91509C` after validation; it was not extracted or modified.
 
 ## What remains unknown after this sample
 
