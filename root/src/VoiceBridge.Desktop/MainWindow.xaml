@@ -193,12 +193,20 @@
                             <ComboBox x:Name="BrowserFilterBox" Grid.Column="1" MinWidth="180" SelectionChanged="BrowserFilter_SelectionChanged" AutomationProperties.Name="Filter archive records" />
                             <Button x:Name="BrowserLoadMoreButton" Grid.Column="2" Content="Load more" Click="BrowserLoadMore_Click" Visibility="Collapsed" />
                         </Grid>
-                        <Grid Grid.Row="2" ColumnDefinitions="380,*" ColumnSpacing="16">
+                        <Grid x:Name="BrowserPaneGrid" Grid.Row="2" ColumnSpacing="0" SizeChanged="BrowserPaneGrid_SizeChanged">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="BrowserListColumn" Width="380" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
                             <Grid x:Name="BrowserListPanel" RowDefinitions="*,Auto">
                                 <ListView x:Name="BrowserListView" ItemTemplate="{StaticResource BrowserEntryTemplate}" SelectionMode="Single" SelectionChanged="BrowserList_SelectionChanged" Background="Transparent" AutomationProperties.Name="Archive records" />
                                 <TextBlock x:Name="BrowserListFooterText" Grid.Row="1" Margin="8,5" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                             </Grid>
-                            <ScrollViewer x:Name="BrowserDetailPanel" Grid.Column="1" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                            <Button x:Name="BrowserPaneSplitter" Grid.Column="1" Width="8" MinWidth="8" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" VerticalAlignment="Stretch" AutomationProperties.Name="Resize list and detail panes" AutomationProperties.HelpText="Drag this divider, or focus it and press the Left or Right arrow key to resize the panes." PointerPressed="BrowserPaneSplitter_PointerPressed" PointerMoved="BrowserPaneSplitter_PointerMoved" PointerReleased="BrowserPaneSplitter_PointerReleased" PointerCaptureLost="BrowserPaneSplitter_PointerCaptureLost" KeyDown="BrowserPaneSplitter_KeyDown">
+                                <Border Width="3" Height="44" CornerRadius="2" Background="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Button>
+                            <ScrollViewer x:Name="BrowserDetailPanel" Grid.Column="2" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                                 <StackPanel Spacing="10">
                                     <TextBlock x:Name="BrowserDetailTitleText" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
                                     <TextBlock x:Name="BrowserDetailSummaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
@@ -208,7 +216,7 @@
                                     <Button x:Name="BrowserDetailLoadMoreButton" Content="Load more messages" Click="BrowserDetailLoadMore_Click" Visibility="Collapsed" HorizontalAlignment="Left" />
                                 </StackPanel>
                             </ScrollViewer>
-                            <Border x:Name="BrowserBuildRequiredPanel" Grid.ColumnSpan="2" Padding="26" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="Collapsed">
+                            <Border x:Name="BrowserBuildRequiredPanel" Grid.ColumnSpan="3" Padding="26" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="Collapsed">
                                 <StackPanel Spacing="12" MaxWidth="740" HorizontalAlignment="Left">
                                     <TextBlock x:Name="BrowserBuildRequiredTitleText" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
                                     <TextBlock x:Name="BrowserBuildRequiredText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />

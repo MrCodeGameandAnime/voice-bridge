@@ -5,6 +5,7 @@ using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Windowing;
 using VoiceBridge.Core.Domain;
 using VoiceBridge.Core.Importing;
@@ -43,12 +44,16 @@ public sealed partial class MainWindow : Window
     private long _browserGeneration;
     private long _detailGeneration;
     private long _browserTotalCount;
+    private double _browserListWidth = 380;
+    private double _browserResizeStartX;
+    private double _browserResizeStartWidth;
     private int _databaseOffset;
     private int _localBrowserOffset;
     private long? _selectedConversationId;
     private int _detailMessageOffset;
     private List<WorkspaceEntry> _selectedMessageEntries = [];
     private bool _suppressBrowserEvents;
+    private bool _isResizingBrowserPane;
 
     public MainWindow()
     {
@@ -391,23 +396,10 @@ public sealed partial class MainWindow : Window
         IssuesNavigationLabelText.Text = presentation.IssuesNavigationLabel;
         IssuesCountText.Text = presentation.IssuesCount;
 
-        var parsedState = _importReport is not null
-            ? $"✓ Imported · {_importReport.RecordsParsed.Messages:N0} messages"
-            : _scanReport is not null
-                ? $"✓ Scanned · {_scanReport.FilesScanned:N0} files"
-                : "Not scanned";
-        var issueState = presentation.IssuesHealthSummary;
-        var sourceState = GetSourceVerificationText();
-        var exportState = _htmlExportSummary is not null
-            ? "✓ HTML archive built"
-            : _importReport is not null
-                ? "Imported · archive not built"
-                : "Archive not built";
-
-        HealthParsedText.Text = parsedState;
-        HealthIssuesText.Text = issueState;
-        HealthSourceText.Text = sourceState;
-        HealthExportText.Text = exportState;
+        HealthParsedText.Text = presentation.HealthParsedState;
+        HealthIssuesText.Text = presentation.HealthIssuesState;
+        HealthSourceText.Text = presentation.HealthSourceState;
+        HealthExportText.Text = presentation.HealthExportState;
     }
 
     private void RefreshOverview()
@@ -700,7 +692,9 @@ public sealed partial class MainWindow : Window
 
             _databaseOffset += databaseItemsToAdd;
             _browserTotalCount = page.DatabaseTotalCount + localCount;
-            BrowserSummaryText.Text = $"{_browserTotalCount:N0} {GetRecordNoun(view)} · search and filters run locally against the imported database.";
+            BrowserSummaryText.Text = view == "Media" && page.MediaSummary is { } mediaSummary
+                ? MediaBrowserSummaryPresentation.Format(mediaSummary.ReferenceCount, mediaSummary.SourceMediaFileCount)
+                : $"{_browserTotalCount:N0} {GetRecordNoun(view)} · search and filters run locally against the imported database.";
             BrowserListFooterText.Text = $"Showing {_browserItems.Count:N0} of {_browserTotalCount:N0}";
             BrowserLoadMoreButton.Visibility = _localBrowserOffset < localCount || _databaseOffset < page.DatabaseTotalCount
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -755,7 +749,8 @@ public sealed partial class MainWindow : Window
             case "Media":
             {
                 var page = reader.ReadMediaPage(search, filter, offset, pageSize);
-                return new BrowserPageResult(page.Items.Select(CreateMediaBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, filter, null);
+                var summary = reader.ReadMediaBrowserSummary();
+                return new BrowserPageResult(page.Items.Select(CreateMediaBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, filter, null, summary);
             }
             case "Issues":
             {
@@ -1112,7 +1107,66 @@ public sealed partial class MainWindow : Window
     }
 
     private WorkspaceStatusPresentation GetWorkspaceStatusPresentation() =>
-        WorkspaceStatusPresentation.Create(_scanReport, _importReport, _exportIssues.Count);
+        WorkspaceStatusPresentation.Create(_scanReport, _importReport, _exportIssues.Count, _htmlExportSummary is not null);
+
+    private void BrowserPaneGrid_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        ApplyBrowserListWidth(_browserListWidth, e.NewSize.Width);
+
+    private void BrowserPaneSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _isResizingBrowserPane = true;
+        _browserResizeStartX = e.GetCurrentPoint(BrowserPaneGrid).Position.X;
+        _browserResizeStartWidth = BrowserListColumn.ActualWidth;
+        BrowserPaneSplitter.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void BrowserPaneSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isResizingBrowserPane)
+        {
+            return;
+        }
+
+        var currentX = e.GetCurrentPoint(BrowserPaneGrid).Position.X;
+        ApplyBrowserListWidth(_browserResizeStartWidth + currentX - _browserResizeStartX, BrowserPaneGrid.ActualWidth);
+        e.Handled = true;
+    }
+
+    private void BrowserPaneSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _isResizingBrowserPane = false;
+        BrowserPaneSplitter.ReleasePointerCapture(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void BrowserPaneSplitter_PointerCaptureLost(object sender, PointerRoutedEventArgs e) =>
+        _isResizingBrowserPane = false;
+
+    private void BrowserPaneSplitter_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        var direction = e.Key switch
+        {
+            Windows.System.VirtualKey.Left => -1,
+            Windows.System.VirtualKey.Right => 1,
+            _ => 0
+        };
+        if (direction == 0)
+        {
+            return;
+        }
+
+        ApplyBrowserListWidth(
+            BrowserPaneSizing.AdjustListWidth(_browserListWidth, BrowserPaneGrid.ActualWidth, direction),
+            BrowserPaneGrid.ActualWidth);
+        e.Handled = true;
+    }
+
+    private void ApplyBrowserListWidth(double requestedWidth, double availableWidth)
+    {
+        _browserListWidth = BrowserPaneSizing.ClampListWidth(requestedWidth, availableWidth);
+        BrowserListColumn.Width = new GridLength(_browserListWidth);
+    }
 
     private void SetSource(string sourcePath)
     {
@@ -1405,7 +1459,8 @@ public sealed partial class MainWindow : Window
         long DatabaseTotalCount,
         int DatabaseItemCount,
         string AppliedFilter,
-        IReadOnlyList<string>? FilterOptions);
+        IReadOnlyList<string>? FilterOptions,
+        StoredMediaBrowserSummary? MediaSummary = null);
 }
 
 public sealed record WorkspaceEntry(string Heading, string Metadata, string Body, string Evidence);

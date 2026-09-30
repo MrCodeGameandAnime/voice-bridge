@@ -646,6 +646,25 @@ public sealed class SqliteArchiveReader : IDisposable
         return new StoredPage<StoredMediaBrowserItem>(items, totalCount);
     }
 
+    public StoredMediaBrowserSummary ReadMediaBrowserSummary()
+    {
+        var mediaRows = BuildMediaRowsSql();
+        using var command = CreateCommand($"""
+            WITH media_rows AS ({mediaRows})
+            SELECT
+                COALESCE(SUM(CASE WHEN record_type = 'source_file' THEN 0 ELSE 1 END), 0),
+                COALESCE(SUM(CASE WHEN record_type = 'source_file' THEN 1 ELSE 0 END), 0)
+            FROM media_rows;
+            """);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return new StoredMediaBrowserSummary(0, 0);
+        }
+
+        return new StoredMediaBrowserSummary(reader.GetInt64(0), reader.GetInt64(1));
+    }
+
     private string BuildMediaRowsSql()
     {
         var sourceHash = _sourceFilesHaveContentHash ? "sf.content_sha256" : "NULL";

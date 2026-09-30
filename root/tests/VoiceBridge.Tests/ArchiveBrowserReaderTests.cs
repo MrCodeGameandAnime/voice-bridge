@@ -68,6 +68,22 @@ public sealed class ArchiveBrowserReaderTests
         Assert.Equal(1, issues.TotalCount);
     }
 
+    [Fact]
+    public async Task MediaSummarySeparatesReferencesFromSourceMediaFiles()
+    {
+        using var temporary = new TemporaryDirectory();
+        var databasePath = await ImportFixtureAsync(temporary.RootPath);
+        using var reader = new SqliteArchiveReader(databasePath);
+
+        var summary = reader.ReadMediaBrowserSummary();
+        var page = reader.ReadMediaPage(null, "All", 0, 20);
+
+        Assert.Equal(3, summary.ReferenceCount);
+        Assert.Equal(2, summary.SourceMediaFileCount);
+        Assert.Equal(5, page.TotalCount);
+        Assert.Equal(summary.ReferenceCount + summary.SourceMediaFileCount, page.TotalCount);
+    }
+
     private static async Task<string> ImportFixtureAsync(string root)
     {
         var zipPath = Path.Combine(root, "takeout.zip");

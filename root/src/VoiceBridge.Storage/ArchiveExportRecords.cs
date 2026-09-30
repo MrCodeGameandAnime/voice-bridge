@@ -6,6 +6,8 @@ public sealed record StoredArchiveMetadata(SourceKind SourceKind, string SourceP
 
 public sealed record StoredPage<T>(IReadOnlyList<T> Items, long TotalCount);
 
+public sealed record StoredMediaBrowserSummary(long ReferenceCount, long SourceMediaFileCount);
+
 public sealed record StoredConversationBrowserRow(
     long Id,
     string? RawLabel,

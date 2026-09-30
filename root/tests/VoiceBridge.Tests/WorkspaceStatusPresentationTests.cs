@@ -21,6 +21,10 @@ public sealed class WorkspaceStatusPresentationTests
         Assert.Equal("Scan issues", presentation.IssuesNavigationLabel);
         Assert.Equal("0", presentation.IssuesCount);
         Assert.Equal("Scan issues: 0", presentation.IssuesHealthSummary);
+        Assert.Equal("✓ Scanned", presentation.HealthParsedState);
+        Assert.Equal("Scan issues: 0", presentation.HealthIssuesState);
+        Assert.Equal("✓ Source verified", presentation.HealthSourceState);
+        Assert.Equal("Archive not built", presentation.HealthExportState);
     }
 
     [Fact]
@@ -29,7 +33,7 @@ public sealed class WorkspaceStatusPresentationTests
         var scan = CreateScanReport(warningCount: 1);
         var import = CreateImportReport(issueCount: 2);
 
-        var presentation = WorkspaceStatusPresentation.Create(scan, import, exportIssueCount: 3);
+        var presentation = WorkspaceStatusPresentation.Create(scan, import, exportIssueCount: 3, archiveBuilt: true);
 
         Assert.Equal("18,732", presentation.MessagesValue);
         Assert.Equal("4,837", presentation.CallsValue);
@@ -38,6 +42,10 @@ public sealed class WorkspaceStatusPresentationTests
         Assert.Equal("Issues", presentation.IssuesNavigationLabel);
         Assert.Equal("6", presentation.IssuesCount);
         Assert.Equal("Scan issues: 1 · Import issues: 2 · Export issues: 3", presentation.IssuesHealthSummary);
+        Assert.Equal("✓ Imported", presentation.HealthParsedState);
+        Assert.Equal("⚠ 6 issues", presentation.HealthIssuesState);
+        Assert.Equal("✓ Source verified", presentation.HealthSourceState);
+        Assert.Equal("✓ Archive built", presentation.HealthExportState);
     }
 
     [Fact]
@@ -52,6 +60,47 @@ public sealed class WorkspaceStatusPresentationTests
         Assert.Equal("Issues", presentation.IssuesNavigationLabel);
         Assert.Equal("—", presentation.IssuesCount);
         Assert.Equal("Not scanned for issues", presentation.IssuesHealthSummary);
+        Assert.Equal("Not scanned", presentation.HealthParsedState);
+        Assert.Equal("Not scanned for issues", presentation.HealthIssuesState);
+        Assert.Equal("Source not verified", presentation.HealthSourceState);
+        Assert.Equal("Archive not built", presentation.HealthExportState);
+    }
+
+    [Fact]
+    public void MediaSummaryExplainsTheEntryCountAsReferencesAndSourceFiles()
+    {
+        var summary = MediaBrowserSummaryPresentation.Format(1_318, 1_319);
+
+        Assert.Equal("2,637 entries · 1,318 references + 1,319 source media files", summary);
+    }
+
+    [Fact]
+    public void ImportedArchiveWithNoIssuesHasCompactHealthAndKeepsUnbuiltState()
+    {
+        var presentation = WorkspaceStatusPresentation.Create(
+            CreateScanReport(warningCount: 0),
+            CreateImportReport(issueCount: 0),
+            exportIssueCount: 0);
+
+        Assert.Equal("✓ No issues", presentation.HealthIssuesState);
+        Assert.Equal("Archive not built", presentation.HealthExportState);
+    }
+
+    [Theory]
+    [InlineData(100, 900, 220)]
+    [InlineData(800, 900, 592)]
+    [InlineData(380, 900, 380)]
+    public void BrowserPaneWidthIsClampedToKeepBothPanesUsable(double requested, double available, double expected)
+    {
+        Assert.Equal(expected, BrowserPaneSizing.ClampListWidth(requested, available));
+    }
+
+    [Fact]
+    public void BrowserPaneKeyboardResizeUsesFixedStepsAndHonorsBounds()
+    {
+        Assert.Equal(404, BrowserPaneSizing.AdjustListWidth(380, 900, 1));
+        Assert.Equal(356, BrowserPaneSizing.AdjustListWidth(380, 900, -1));
+        Assert.Equal(592, BrowserPaneSizing.AdjustListWidth(590, 900, 1));
     }
 
     private static ScanReport CreateScanReport(int warningCount) => new(
