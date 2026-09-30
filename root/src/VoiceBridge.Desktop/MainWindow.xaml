@@ -29,6 +29,15 @@
                     </StackPanel>
                 </Border>
             </DataTemplate>
+            <DataTemplate x:Key="BrowserEntryTemplate">
+                <Border Margin="0,0,0,6" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="7">
+                    <StackPanel Spacing="5">
+                        <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Metadata}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Body}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" MaxLines="3" />
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
         </NavigationView.Resources>
         <NavigationView.PaneHeader>
             <StackPanel Padding="18,18,18,10" Spacing="14">
@@ -73,15 +82,19 @@
                     <TextBlock x:Name="MediaCountText" Grid.Column="1" Text="—" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </Grid>
             </NavigationViewItem>
-            <NavigationViewItemHeader>
-                <StackPanel Margin="12,10,12,10" Spacing="5">
-                    <TextBlock Text="HEALTH" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock x:Name="HealthParsedText" Text="Not scanned" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
-                    <TextBlock x:Name="HealthIssuesText" Text="Not scanned for issues" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
-                    <TextBlock x:Name="HealthSourceText" Text="Source not verified" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
-                    <TextBlock x:Name="HealthExportText" Text="Archive not built" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-            </NavigationViewItemHeader>
+            <NavigationViewItemHeader Content="HEALTH" />
+            <NavigationViewItem IsTabStop="False" IsHitTestVisible="False" MinHeight="32" Padding="12,0">
+                <TextBlock x:Name="HealthParsedText" Text="Not scanned" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+            </NavigationViewItem>
+            <NavigationViewItem IsTabStop="False" IsHitTestVisible="False" MinHeight="32" Padding="12,0">
+                <TextBlock x:Name="HealthIssuesText" Text="Not scanned for issues" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+            </NavigationViewItem>
+            <NavigationViewItem IsTabStop="False" IsHitTestVisible="False" MinHeight="32" Padding="12,0">
+                <TextBlock x:Name="HealthSourceText" Text="Source not verified" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+            </NavigationViewItem>
+            <NavigationViewItem IsTabStop="False" IsHitTestVisible="False" MinHeight="32" Padding="12,0">
+                <TextBlock x:Name="HealthExportText" Text="Archive not built" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+            </NavigationViewItem>
             <NavigationViewItemHeader Content="TOOLS" />
             <NavigationViewItem x:Name="OverviewNavigationItem" Content="Overview" Tag="Overview" IsSelected="True" />
             <NavigationViewItem x:Name="IssuesNavigationItem" Tag="Issues">
@@ -170,44 +183,39 @@
                         </ScrollViewer>
                     </Grid>
 
-                    <Grid x:Name="MessagesView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
-                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
-                            <TextBlock Text="Messages" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock x:Name="MessagesViewSummaryText" Text="Build the local archive to inspect parsed messages." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                    <Grid x:Name="ContentBrowserView" Margin="28" RowDefinitions="Auto,Auto,*" Visibility="Collapsed">
+                        <StackPanel Grid.Row="0" Margin="0,0,0,14" Spacing="5">
+                            <TextBlock x:Name="BrowserTitleText" Text="Messages" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock x:Name="BrowserSummaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         </StackPanel>
-                        <ListView x:Name="MessagesListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Parsed messages" />
-                    </Grid>
-
-                    <Grid x:Name="CallsView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
-                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
-                            <TextBlock Text="Calls" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock x:Name="CallsViewSummaryText" Text="Build the local archive to inspect parsed call records." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ListView x:Name="CallsListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Parsed calls" />
-                    </Grid>
-
-                    <Grid x:Name="VoicemailsView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
-                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
-                            <TextBlock Text="Voicemails" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock x:Name="VoicemailsViewSummaryText" Text="Build the local archive to inspect transcripts and media references." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ListView x:Name="VoicemailsListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Parsed voicemails" />
-                    </Grid>
-
-                    <Grid x:Name="MediaView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
-                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
-                            <TextBlock Text="Media" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock x:Name="MediaViewSummaryText" Text="Build the local archive to inspect source media and attachment matches." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ListView x:Name="MediaListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Source media and attachment references" />
-                    </Grid>
-
-                    <Grid x:Name="IssuesView" Margin="28" RowDefinitions="Auto,*" Visibility="Collapsed">
-                        <StackPanel Grid.Row="0" Margin="0,0,0,16" Spacing="5">
-                            <TextBlock Text="Issues" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock x:Name="IssuesViewSummaryText" Text="Scan warnings and import/export findings will remain visible here." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ListView x:Name="IssuesListView" Grid.Row="1" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" SelectionMode="None" IsItemClickEnabled="False" Background="Transparent" AutomationProperties.Name="Scan, import, and export issues" />
+                        <Grid Grid.Row="1" Margin="0,0,0,12" ColumnDefinitions="*,220,Auto" ColumnSpacing="10">
+                            <TextBox x:Name="BrowserSearchBox" PlaceholderText="Search this archive" TextChanged="BrowserSearch_TextChanged" AutomationProperties.Name="Search archive records" />
+                            <ComboBox x:Name="BrowserFilterBox" Grid.Column="1" MinWidth="180" SelectionChanged="BrowserFilter_SelectionChanged" AutomationProperties.Name="Filter archive records" />
+                            <Button x:Name="BrowserLoadMoreButton" Grid.Column="2" Content="Load more" Click="BrowserLoadMore_Click" Visibility="Collapsed" />
+                        </Grid>
+                        <Grid Grid.Row="2" ColumnDefinitions="380,*" ColumnSpacing="16">
+                            <Grid x:Name="BrowserListPanel" RowDefinitions="*,Auto">
+                                <ListView x:Name="BrowserListView" ItemTemplate="{StaticResource BrowserEntryTemplate}" SelectionMode="Single" SelectionChanged="BrowserList_SelectionChanged" Background="Transparent" AutomationProperties.Name="Archive records" />
+                                <TextBlock x:Name="BrowserListFooterText" Grid.Row="1" Margin="8,5" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            </Grid>
+                            <ScrollViewer x:Name="BrowserDetailPanel" Grid.Column="1" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                                <StackPanel Spacing="10">
+                                    <TextBlock x:Name="BrowserDetailTitleText" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="BrowserDetailSummaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                    <Image x:Name="BrowserMediaPreviewImage" MaxHeight="360" Stretch="Uniform" Visibility="Collapsed" AutomationProperties.Name="Local media preview" />
+                                    <MediaPlayerElement x:Name="BrowserMediaPlayer" MaxHeight="300" AreTransportControlsEnabled="True" AutoPlay="False" Visibility="Collapsed" />
+                                    <ItemsControl x:Name="BrowserDetailItemsControl" ItemTemplate="{StaticResource WorkspaceEntryTemplate}" />
+                                    <Button x:Name="BrowserDetailLoadMoreButton" Content="Load more messages" Click="BrowserDetailLoadMore_Click" Visibility="Collapsed" HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </ScrollViewer>
+                            <Border x:Name="BrowserBuildRequiredPanel" Grid.ColumnSpan="2" Padding="26" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10" Visibility="Collapsed">
+                                <StackPanel Spacing="12" MaxWidth="740" HorizontalAlignment="Left">
+                                    <TextBlock x:Name="BrowserBuildRequiredTitleText" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="BrowserBuildRequiredText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    <Button Content="Go to Export" Click="OpenExport_Click" HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
                     </Grid>
 
                     <Grid x:Name="ExportView" Margin="28" Visibility="Collapsed">

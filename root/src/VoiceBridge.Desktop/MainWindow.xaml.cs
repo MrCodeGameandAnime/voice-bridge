@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.ObjectModel;
 using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
@@ -21,9 +22,13 @@ namespace VoiceBridge.Desktop;
 public sealed partial class MainWindow : Window
 {
     private static readonly JsonSerializerOptions ReportJsonOptions = new() { WriteIndented = true };
-    private static readonly HashSet<string> MediaTypes = new(StringComparer.OrdinalIgnoreCase) { "audio", "image", "video" };
+    private const int BrowserPageSize = 60;
+    private const int MessagePageSize = 50;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly List<WorkspaceEntry> _exportIssues = [];
+    private readonly ObservableCollection<BrowserItem> _browserItems = [];
+    private List<BrowserItem> _localBrowserItems = [];
+    private DispatcherQueueTimer? _searchDebounceTimer;
     private string? _sourcePath;
     private string? _outputDirectory;
     private string? _databasePath;
@@ -33,8 +38,17 @@ public sealed partial class MainWindow : Window
     private ScanReport? _scanReport;
     private ExportSummary? _htmlExportSummary;
     private ExportSummary? _csvExportSummary;
-    private WorkspaceData? _workspaceData;
     private CancellationTokenSource? _operationCancellation;
+    private string _currentViewName = "Overview";
+    private long _browserGeneration;
+    private long _detailGeneration;
+    private long _browserTotalCount;
+    private int _databaseOffset;
+    private int _localBrowserOffset;
+    private long? _selectedConversationId;
+    private int _detailMessageOffset;
+    private List<WorkspaceEntry> _selectedMessageEntries = [];
+    private bool _suppressBrowserEvents;
 
     public MainWindow()
     {
@@ -47,6 +61,15 @@ public sealed partial class MainWindow : Window
         appWindow.Resize(new SizeInt32(1320, 900));
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread()
             ?? throw new InvalidOperationException("The UI dispatcher is unavailable.");
+        BrowserListView.ItemsSource = _browserItems;
+        _searchDebounceTimer = _dispatcherQueue.CreateTimer();
+        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(350);
+        _searchDebounceTimer.IsRepeating = false;
+        _searchDebounceTimer.Tick += (_, _) =>
+        {
+            _searchDebounceTimer?.Stop();
+            _ = LoadBrowserPageAsync(reset: true);
+        };
         WorkspaceNavigation.SelectedItem = OverviewNavigationItem;
         ShowWorkspaceView("Overview");
         RefreshWorkspace();
@@ -166,14 +189,13 @@ public sealed partial class MainWindow : Window
         var databasePath = Path.Combine(outputDirectory, "voicebridge.db");
         var reportPath = Path.Combine(outputDirectory, "import-report.json");
         var archiveDirectory = Path.Combine(outputDirectory, "archive");
-        _databasePath = databasePath;
+        _databasePath = null;
         _archiveIndexPath = null;
         _htmlExportSummary = null;
         _csvExportSummary = null;
         _csvExportDirectory = null;
         _exportIssues.Clear();
         _importReport = null;
-        _workspaceData = null;
 
         try
         {
@@ -202,12 +224,10 @@ public sealed partial class MainWindow : Window
             _importReport = await Task.Run(
                 () => service.ImportAsync(sourcePath, databasePath, cancellation.Token),
                 cancellation.Token);
+            _databasePath = databasePath;
             await WriteImportReportAsync(reportPath, _importReport, cancellation.Token);
 
-            SetStatus("Loading the imported records into the workspace…");
-            _workspaceData = await Task.Run(
-                () => ReadWorkspaceData(databasePath, cancellation.Token),
-                cancellation.Token);
+            SetStatus("The local archive is ready. Opening records now reads only the page you request.");
             RefreshWorkspace();
 
             SetStatus("Building the offline HTML archive…");
@@ -236,21 +256,15 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task LoadCompletedImportIfAvailableAsync(string databasePath)
+    private Task LoadCompletedImportIfAvailableAsync(string databasePath)
     {
-        if (_importReport is null || !File.Exists(databasePath) || _workspaceData is not null)
+        if (_importReport is null || !File.Exists(databasePath))
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        try
-        {
-            _workspaceData = await Task.Run(() => ReadWorkspaceData(databasePath, CancellationToken.None));
-        }
-        catch (Exception exception)
-        {
-            _exportIssues.Add(CreateOperationIssue("Workspace data could not be loaded", exception));
-        }
+        _databasePath = databasePath;
+        return Task.CompletedTask;
     }
 
     private void UpdateImportProgress(ImportProgress progress)
@@ -333,23 +347,27 @@ public sealed partial class MainWindow : Window
 
     private void ShowWorkspaceView(string viewName)
     {
+        _currentViewName = viewName;
         OverviewView.Visibility = viewName == "Overview" ? Visibility.Visible : Visibility.Collapsed;
-        MessagesView.Visibility = viewName == "Messages" ? Visibility.Visible : Visibility.Collapsed;
-        CallsView.Visibility = viewName == "Calls" ? Visibility.Visible : Visibility.Collapsed;
-        VoicemailsView.Visibility = viewName == "Voicemails" ? Visibility.Visible : Visibility.Collapsed;
-        MediaView.Visibility = viewName == "Media" ? Visibility.Visible : Visibility.Collapsed;
-        IssuesView.Visibility = viewName == "Issues" ? Visibility.Visible : Visibility.Collapsed;
+        ContentBrowserView.Visibility = viewName is "Messages" or "Calls" or "Voicemails" or "Media" or "Issues" ? Visibility.Visible : Visibility.Collapsed;
         ExportView.Visibility = viewName == "Export" ? Visibility.Visible : Visibility.Collapsed;
+        if (ContentBrowserView.Visibility == Visibility.Visible)
+        {
+            ConfigureBrowserView();
+            _ = LoadBrowserPageAsync(reset: true);
+        }
     }
 
     private void RefreshWorkspace()
     {
         RefreshSidebar();
         RefreshOverview();
-        RefreshDataViews();
-        RefreshIssuesView();
         RefreshExportView();
         RefreshControls();
+        if (ContentBrowserView.Visibility == Visibility.Visible)
+        {
+            _ = LoadBrowserPageAsync(reset: true);
+        }
     }
 
     private void RefreshSidebar()
@@ -499,71 +517,541 @@ public sealed partial class MainWindow : Window
         return "Folder scan completed · no container checksum available";
     }
 
-    private void RefreshDataViews()
+    private void ConfigureBrowserView()
     {
-        var data = _workspaceData;
-        MessagesViewSummaryText.Text = data is null
-            ? "Build the local archive in Export to inspect parsed messages."
-            : $"{data.Messages.Count:N0} message records. Source timestamps, direction evidence, attachments, and row provenance are retained.";
-        CallsViewSummaryText.Text = data is null
-            ? "Build the local archive in Export to inspect parsed call records."
-            : $"{data.Calls.Count:N0} call records. Event labels, contacts, durations, media references, and source paths remain as imported.";
-        VoicemailsViewSummaryText.Text = data is null
-            ? "Build the local archive in Export to inspect transcripts and media references."
-            : $"{data.Voicemails.Count:N0} voicemail records. Transcript and audio fields remain optional and are shown with their recorded match status.";
-        MediaViewSummaryText.Text = data is null
-            ? "Build the local archive in Export to inspect source media and attachment matches."
-            : $"{data.MediaFileCount:N0} source media files and {data.MediaReferences.Count:N0} recorded media references. Matched and unresolved references remain visible.";
-
-        SetItems(MessagesListView, data?.Messages, "No message records were imported.", "Messages appear here after a successful import.");
-        SetItems(CallsListView, data?.Calls, "No call records were imported.", "Calls appear here after a successful import.");
-        SetItems(VoicemailsListView, data?.Voicemails, "No voicemail records were imported.", "Voicemails appear here after a successful import.");
-        SetItems(MediaListView, data?.MediaReferences, "No media files or references were imported.", "Source media and recorded references appear here after a successful import.");
+        _suppressBrowserEvents = true;
+        BrowserTitleText.Text = _currentViewName;
+        BrowserSearchBox.Text = string.Empty;
+        BrowserSearchBox.PlaceholderText = _currentViewName == "Issues" ? "Search issue code, text, or source path" : $"Search {_currentViewName.ToLowerInvariant()}";
+        BrowserFilterBox.ItemsSource = _currentViewName switch
+        {
+            "Messages" => new[] { "All", "With attachments", "Groups" },
+            "Media" => new[] { "All", "Image", "Video", "Audio", "Unresolved" },
+            _ => new[] { "All" }
+        };
+        BrowserFilterBox.SelectedIndex = 0;
+        BrowserFilterBox.Visibility = _currentViewName == "Voicemails" ? Visibility.Collapsed : Visibility.Visible;
+        BrowserSearchBox.Visibility = _currentViewName == "Issues" || (_databasePath is not null && File.Exists(_databasePath)) ? Visibility.Visible : Visibility.Collapsed;
+        BrowserLoadMoreButton.Visibility = Visibility.Collapsed;
+        BrowserListPanel.Visibility = Visibility.Visible;
+        BrowserDetailPanel.Visibility = Visibility.Collapsed;
+        BrowserBuildRequiredPanel.Visibility = Visibility.Collapsed;
+        BrowserMediaPreviewImage.Visibility = Visibility.Collapsed;
+        BrowserMediaPlayer.Visibility = Visibility.Collapsed;
+        BrowserDetailLoadMoreButton.Visibility = Visibility.Collapsed;
+        BrowserDetailItemsControl.ItemsSource = null;
+        BrowserListFooterText.Text = string.Empty;
+        _localBrowserItems = [];
+        _localBrowserOffset = 0;
+        _suppressBrowserEvents = false;
     }
 
-    private static void SetItems(ListView listView, IReadOnlyList<WorkspaceEntry>? items, string emptyMessage, string unavailableMessage)
+    private void BrowserSearch_TextChanged(object sender, TextChangedEventArgs e)
     {
-        listView.ItemsSource = items is null
-            ? [new WorkspaceEntry("Not imported", string.Empty, unavailableMessage, string.Empty)]
-            : items.Count == 0
-                ? [new WorkspaceEntry("No records", string.Empty, emptyMessage, string.Empty)]
-                : items;
+        if (_suppressBrowserEvents || BrowserSearchBox.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _searchDebounceTimer?.Stop();
+        _searchDebounceTimer?.Start();
     }
 
-    private void RefreshIssuesView()
+    private void BrowserFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_suppressBrowserEvents && ContentBrowserView.Visibility == Visibility.Visible)
+        {
+            _ = LoadBrowserPageAsync(reset: true);
+        }
+    }
+
+    private void BrowserLoadMore_Click(object sender, RoutedEventArgs e) => _ = LoadBrowserPageAsync(reset: false);
+
+    private async Task LoadBrowserPageAsync(bool reset)
+    {
+        if (reset)
+        {
+            _browserGeneration++;
+            _browserItems.Clear();
+            _databaseOffset = 0;
+            _localBrowserOffset = 0;
+            _browserTotalCount = 0;
+            _selectedConversationId = null;
+            BrowserDetailPanel.Visibility = Visibility.Collapsed;
+            BrowserMediaPreviewImage.Visibility = Visibility.Collapsed;
+            BrowserMediaPlayer.Visibility = Visibility.Collapsed;
+        }
+
+        var generation = _browserGeneration;
+        var databasePath = _databasePath;
+        var search = BrowserSearchBox.Text;
+        var filter = BrowserFilterBox.SelectedItem as string ?? "All";
+        var view = _currentViewName;
+        var isImported = databasePath is not null && File.Exists(databasePath);
+        if (!isImported && view is ("Messages" or "Calls" or "Voicemails" or "Media"))
+        {
+            BrowserTitleText.Text = view;
+            BrowserSummaryText.Text = GetPreBuildSummary(view);
+            BrowserListPanel.Visibility = Visibility.Collapsed;
+            BrowserDetailPanel.Visibility = Visibility.Collapsed;
+            BrowserBuildRequiredPanel.Visibility = Visibility.Visible;
+            BrowserBuildRequiredTitleText.Text = GetPreBuildSummary(view);
+            BrowserBuildRequiredText.Text = _scanReport is null
+                ? "Select and scan a Takeout source first. Scanning inventories it without changing the original archive."
+                : "Build the local archive to browse reconstructed records. Choose a destination under Export. This count describes source pages or files, not imported records.";
+            BrowserSearchBox.Visibility = Visibility.Collapsed;
+            BrowserFilterBox.Visibility = Visibility.Collapsed;
+            BrowserLoadMoreButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        BrowserListPanel.Visibility = Visibility.Visible;
+        BrowserBuildRequiredPanel.Visibility = Visibility.Collapsed;
+        BrowserSearchBox.Visibility = Visibility.Visible;
+        BrowserFilterBox.Visibility = view == "Voicemails" ? Visibility.Collapsed : Visibility.Visible;
+        BrowserTitleText.Text = view;
+        BrowserDetailPanel.Visibility = Visibility.Visible;
+        BrowserDetailTitleText.Text = $"Select a {view switch { "Messages" => "conversation", "Calls" => "call", "Voicemails" => "voicemail", "Media" => "media item", _ => "finding" }}";
+        BrowserDetailSummaryText.Text = "Choose an item in the list to inspect its recorded fields and source evidence.";
+        BrowserDetailItemsControl.ItemsSource = Array.Empty<WorkspaceEntry>();
+        if (view == "Issues")
+        {
+            _localBrowserItems = BuildLocalIssueItems(search, filter);
+        }
+
+        if (!isImported && view == "Issues")
+        {
+            var localPage = _localBrowserItems.Skip(_localBrowserOffset).Take(BrowserPageSize).ToArray();
+            foreach (var item in localPage)
+            {
+                _browserItems.Add(item);
+            }
+
+            _localBrowserOffset += localPage.Length;
+            _browserTotalCount = _localBrowserItems.Count;
+            BrowserSummaryText.Text = $"{_localBrowserItems.Count:N0} scan or export findings. Exact warning and issue text is preserved.";
+            BrowserListFooterText.Text = $"Showing {_browserItems.Count:N0} of {_browserTotalCount:N0}";
+            BrowserLoadMoreButton.Visibility = _browserItems.Count < _browserTotalCount ? Visibility.Visible : Visibility.Collapsed;
+            return;
+        }
+
+        if (!isImported)
+        {
+            return;
+        }
+
+        BrowserLoadMoreButton.IsEnabled = false;
+        try
+        {
+            var localCount = view == "Issues" ? _localBrowserItems.Count : 0;
+            var localRemaining = Math.Max(0, localCount - _localBrowserOffset);
+            var localTake = Math.Min(BrowserPageSize, localRemaining);
+            var remainingPageSize = Math.Max(1, BrowserPageSize - localTake);
+            var page = await Task.Run(() => ReadBrowserPage(databasePath!, view, search, filter, _databaseOffset, remainingPageSize));
+            if (generation != _browserGeneration || view != _currentViewName)
+            {
+                return;
+            }
+
+            if (page.FilterOptions is not null)
+            {
+                var filterOptions = page.FilterOptions;
+                if (view == "Issues")
+                {
+                    filterOptions = filterOptions.Concat(_localBrowserItems.Select(GetIssueCode).Where(code => code is not null).Cast<string>())
+                        .Distinct(StringComparer.Ordinal).ToArray();
+                    if (!filterOptions.Contains("All", StringComparer.Ordinal))
+                    {
+                        filterOptions = new[] { "All" }.Concat(filterOptions).ToArray();
+                    }
+                }
+
+                _suppressBrowserEvents = true;
+                BrowserFilterBox.ItemsSource = filterOptions;
+                BrowserFilterBox.SelectedItem = filterOptions.Contains(filter, StringComparer.Ordinal) ? filter : "All";
+                _suppressBrowserEvents = false;
+                filter = BrowserFilterBox.SelectedItem as string ?? "All";
+                if (filter != page.AppliedFilter)
+                {
+                    _ = LoadBrowserPageAsync(reset: true);
+                    return;
+                }
+
+                if (view == "Issues")
+                {
+                    _localBrowserItems = BuildLocalIssueItems(search, filter);
+                    localCount = _localBrowserItems.Count;
+                    localRemaining = Math.Max(0, localCount - _localBrowserOffset);
+                    localTake = Math.Min(BrowserPageSize, localRemaining);
+                }
+            }
+
+            foreach (var item in _localBrowserItems.Skip(_localBrowserOffset).Take(localTake))
+            {
+                _browserItems.Add(item);
+            }
+
+            _localBrowserOffset += localTake;
+            var databaseItemsToAdd = Math.Min(page.Items.Count, BrowserPageSize - localTake);
+            foreach (var item in page.Items.Take(databaseItemsToAdd))
+            {
+                _browserItems.Add(item);
+            }
+
+            _databaseOffset += databaseItemsToAdd;
+            _browserTotalCount = page.DatabaseTotalCount + localCount;
+            BrowserSummaryText.Text = $"{_browserTotalCount:N0} {GetRecordNoun(view)} · search and filters run locally against the imported database.";
+            BrowserListFooterText.Text = $"Showing {_browserItems.Count:N0} of {_browserTotalCount:N0}";
+            BrowserLoadMoreButton.Visibility = _localBrowserOffset < localCount || _databaseOffset < page.DatabaseTotalCount
+                ? Visibility.Visible : Visibility.Collapsed;
+            if (_browserItems.Count == 0)
+            {
+                BrowserDetailPanel.Visibility = Visibility.Visible;
+                BrowserDetailTitleText.Text = "No matching records";
+                BrowserDetailSummaryText.Text = "Try a different search or filter.";
+                BrowserDetailItemsControl.ItemsSource = Array.Empty<WorkspaceEntry>();
+            }
+        }
+        catch (Exception exception)
+        {
+            if (generation == _browserGeneration)
+            {
+                BrowserDetailPanel.Visibility = Visibility.Visible;
+                BrowserDetailTitleText.Text = "Records could not be loaded";
+                BrowserDetailSummaryText.Text = GetUserMessage(exception, "VoiceBridge couldn't read this page from the local archive.");
+            }
+        }
+        finally
+        {
+            if (generation == _browserGeneration)
+            {
+                BrowserLoadMoreButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private static BrowserPageResult ReadBrowserPage(string databasePath, string view, string? search, string filter, int offset, int pageSize)
+    {
+        using var reader = new SqliteArchiveReader(databasePath);
+        switch (view)
+        {
+            case "Messages":
+            {
+                var page = reader.ReadConversationPage(search, filter, offset, pageSize);
+                return new BrowserPageResult(page.Items.Select(CreateConversationBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, filter, null);
+            }
+            case "Calls":
+            {
+                var filters = new[] { "All" }.Concat(reader.ReadCallEventTypes()).ToArray();
+                var appliedFilter = filters.Contains(filter, StringComparer.Ordinal) ? filter : "All";
+                var page = reader.ReadCallPage(search, appliedFilter, offset, pageSize);
+                return new BrowserPageResult(page.Items.Select(CreateCallBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, appliedFilter, filters);
+            }
+            case "Voicemails":
+            {
+                var page = reader.ReadVoicemailPage(search, offset, pageSize);
+                return new BrowserPageResult(page.Items.Select(CreateVoicemailBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, "All", null);
+            }
+            case "Media":
+            {
+                var page = reader.ReadMediaPage(search, filter, offset, pageSize);
+                return new BrowserPageResult(page.Items.Select(CreateMediaBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, filter, null);
+            }
+            case "Issues":
+            {
+                var filters = new[] { "All" }.Concat(reader.ReadImportIssueCodes()).Distinct(StringComparer.Ordinal).ToArray();
+                var appliedFilter = filters.Contains(filter, StringComparer.Ordinal) ? filter : "All";
+                var page = reader.ReadImportIssuePage(search, appliedFilter, offset, pageSize);
+                return new BrowserPageResult(page.Items.Select(CreateIssueBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, appliedFilter, filters);
+            }
+            default:
+                return new BrowserPageResult([], 0, 0, 0, filter, null);
+        }
+    }
+
+    private string GetPreBuildSummary(string view)
+    {
+        if (_scanReport is null)
+        {
+            return "Select and scan a Takeout archive";
+        }
+
+        return view switch
+        {
+            "Messages" => $"{_scanReport.CandidateMessagePages:N0} message pages discovered",
+            "Calls" => $"{_scanReport.CandidateCallEventPages:N0} call/event pages discovered",
+            "Voicemails" => $"{_scanReport.CandidateVoicemailPages:N0} voicemail pages discovered",
+            "Media" => $"{_scanReport.CandidateImageVideoMediaFiles + _scanReport.CandidateAudioMediaFiles:N0} media files discovered",
+            _ => "Scan the source archive to see discovered content"
+        };
+    }
+
+    private static string GetRecordNoun(string view) => view switch
+    {
+        "Messages" => "conversations",
+        "Calls" => "calls",
+        "Voicemails" => "voicemails",
+        "Media" => "media records",
+        "Issues" => "findings",
+        _ => "records"
+    };
+
+    private List<BrowserItem> BuildLocalIssueItems(string? search, string filter)
     {
         var entries = new List<WorkspaceEntry>();
         if (_scanReport is not null)
         {
             entries.AddRange(_scanReport.Warnings.Select(warning => new WorkspaceEntry(
-                $"Scan warning · {warning.Code}",
-                warning.RelativePath is null ? "Scan" : $"Source: {warning.RelativePath}",
-                warning.Message,
-                string.Empty)));
-        }
-
-        if (_workspaceData is not null)
-        {
-            entries.AddRange(_workspaceData.ImportIssues);
-        }
-        else if (_importReport is not null)
-        {
-            entries.AddRange(_importReport.Issues.Select((issue, index) => new WorkspaceEntry(
-                $"Import {issue.Severity} · {issue.Code}",
-                $"Issue {index + 1:N0}",
-                issue.Message,
-                FormatProvenance(issue.SourceRelativePath, issue.SourceRowIndex))));
+                $"Scan warning · {warning.Code}", warning.RelativePath is null ? "Scan" : $"Source: {warning.RelativePath}", warning.Message,
+                FormatProvenance(warning.RelativePath, null))));
         }
 
         entries.AddRange(_exportIssues);
-        IssuesViewSummaryText.Text = entries.Count == 0
-            ? _scanReport is null
-                ? "Scan warnings and import/export findings will remain visible here."
-                : "No scan, import, or export issues were recorded."
-            : $"{entries.Count:N0} scan, import, or export finding(s). Original codes, messages, paths, rows, and media reasons are preserved.";
-        IssuesListView.ItemsSource = entries.Count == 0
-            ? [new WorkspaceEntry("No findings", string.Empty, "No scan warnings or import/export issues have been recorded.", string.Empty)]
-            : entries;
+        var filtered = entries.Where(entry =>
+            (filter == "All" || entry.Heading.EndsWith($"· {filter}", StringComparison.Ordinal))
+            && (string.IsNullOrWhiteSpace(search) || string.Join("\n", entry.Heading, entry.Metadata, entry.Body, entry.Evidence).Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)));
+        return filtered.Select((entry, index) => new BrowserItem("local_issue", -(index + 1), entry.Heading, entry.Metadata, entry.Body, entry.Evidence, entry)).ToList();
+    }
+
+    private static BrowserItem CreateConversationBrowserItem(StoredConversationBrowserRow conversation) => new(
+        "conversation", conversation.Id,
+        string.IsNullOrWhiteSpace(conversation.RawLabel) ? $"Conversation {conversation.Id}" : conversation.RawLabel,
+        $"{conversation.Kind} · {conversation.MessageCount:N0} messages · last {ShowRaw(conversation.LastTimestampUtc)}",
+        string.IsNullOrWhiteSpace(conversation.Preview) ? "No message preview recorded." : conversation.Preview,
+        $"Participants: {ShowRaw(conversation.ParticipantSummary)}\nSource: {conversation.SourceRelativePath}", conversation);
+
+    private static BrowserItem CreateCallBrowserItem(StoredCallRecord call)
+    {
+        var label = FirstRecorded(call.RawContact, call.RawFilenameContact, call.RawPhoneNumber) ?? $"Call record {call.Id}";
+        return new BrowserItem("call", call.Id, label,
+            $"{ShowRaw(call.RawEventType)} · {ShowRaw(call.TimestampUtc ?? call.RawTimestamp)} · {ShowRaw(call.DurationDisplayText)}",
+            $"Phone: {ShowRaw(call.RawPhoneNumber)}", $"Source: {call.SourceRelativePath}", call);
+    }
+
+    private static BrowserItem CreateVoicemailBrowserItem(StoredVoicemail voicemail)
+    {
+        var label = FirstRecorded(voicemail.RawContact, voicemail.RawFilenameContact, voicemail.RawPhoneNumber) ?? $"Voicemail {voicemail.Id}";
+        var preview = string.IsNullOrWhiteSpace(voicemail.Transcript) ? "No transcript available." : voicemail.Transcript;
+        return new BrowserItem("voicemail", voicemail.Id, label,
+            $"{ShowRaw(voicemail.TimestampUtc ?? voicemail.RawTimestamp)} · Audio: {voicemail.AudioMatchStatus}",
+            preview, $"Source: {voicemail.SourceRelativePath}", voicemail);
+    }
+
+    private static BrowserItem CreateMediaBrowserItem(StoredMediaBrowserItem media)
+    {
+        var heading = media.RecordType == "source_file"
+            ? media.MatchedRelativePath ?? $"Source media file {media.RecordId}"
+            : media.RawReference ?? $"{media.RecordType} {media.RecordId}";
+        var status = media.RecordType == "source_file" ? "Source file" : media.MatchStatus;
+        return new BrowserItem("media", media.RecordId,
+            heading,
+            $"{media.RecordType} · {ShowRaw(media.MediaType)} · {status}{(media.SizeBytes is null ? string.Empty : $" · {FormatBytes(media.SizeBytes.Value)}")}",
+            media.MatchedRelativePath ?? media.SourceRelativePath ?? "Path not recorded",
+            media.SourceRelativePath is null ? "Source path not recorded" : $"Source: {media.SourceRelativePath}", media);
+    }
+
+    private static BrowserItem CreateIssueBrowserItem(StoredImportIssue issue) => new(
+        "issue", issue.Id, $"{issue.Severity} · {issue.Code}",
+        $"Issue ID: {issue.Id} · Source file ID: {ShowRaw(issue.SourceFileId?.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+        issue.Message,
+        FormatProvenance(issue.SourceRelativePath, issue.SourceRowIndex), issue);
+
+    private static string? FirstRecorded(params string?[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+    private static string? GetIssueCode(BrowserItem item)
+    {
+        const string scanPrefix = "Scan warning · ";
+        if (item.Heading.StartsWith(scanPrefix, StringComparison.Ordinal))
+        {
+            return item.Heading[scanPrefix.Length..];
+        }
+
+        return item.Data is StoredImportIssue issue ? issue.Code : null;
+    }
+
+    private async void BrowserList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (BrowserListView.SelectedItem is not BrowserItem item)
+        {
+            return;
+        }
+
+        var selection = ++_detailGeneration;
+        BrowserDetailPanel.Visibility = Visibility.Visible;
+        BrowserDetailLoadMoreButton.Visibility = Visibility.Collapsed;
+        BrowserMediaPreviewImage.Visibility = Visibility.Collapsed;
+        BrowserMediaPlayer.Source = null;
+        BrowserMediaPlayer.Visibility = Visibility.Collapsed;
+        BrowserDetailTitleText.Text = item.Heading;
+        BrowserDetailSummaryText.Text = item.Metadata;
+
+        switch (item.RecordType)
+        {
+            case "conversation" when item.Data is StoredConversationBrowserRow conversation:
+                await ShowConversationDetailsAsync(conversation, selection);
+                break;
+            case "call" when item.Data is StoredCallRecord call:
+                BrowserDetailItemsControl.ItemsSource = new[] { CreateCallEntry(call) };
+                break;
+            case "voicemail" when item.Data is StoredVoicemail voicemail:
+                BrowserDetailItemsControl.ItemsSource = new[] { CreateVoicemailEntry(voicemail) };
+                if (voicemail.MatchedAudioSourceFileId is long voicemailAudioId)
+                {
+                    await ShowMediaPreviewAsync(new StoredMediaBrowserItem(
+                        "voicemail_audio", voicemail.Id, voicemail.Id, voicemail.AudioReference,
+                        voicemailAudioId, voicemail.MatchedAudioRelativePath, "audio", voicemail.AudioMatchStatus,
+                        voicemail.SourceRelativePath, null, null));
+                }
+                break;
+            case "media" when item.Data is StoredMediaBrowserItem media:
+                BrowserDetailItemsControl.ItemsSource = new[] { CreateMediaDetail(media) };
+                await ShowMediaPreviewAsync(media);
+                break;
+            case "issue" when item.Data is StoredImportIssue issue:
+                BrowserDetailItemsControl.ItemsSource = new[] { CreateIssueDetail(issue) };
+                break;
+            case "local_issue" when item.Data is WorkspaceEntry localIssue:
+                BrowserDetailItemsControl.ItemsSource = new[] { localIssue };
+                break;
+            default:
+                BrowserDetailItemsControl.ItemsSource = Array.Empty<WorkspaceEntry>();
+                break;
+        }
+    }
+
+    private async Task ShowConversationDetailsAsync(StoredConversationBrowserRow conversation, long selection)
+    {
+        if (_databasePath is null)
+        {
+            return;
+        }
+
+        _selectedConversationId = conversation.Id;
+        _detailMessageOffset = 0;
+        _selectedMessageEntries = [];
+        var databasePath = _databasePath;
+        var details = await Task.Run(() =>
+        {
+            using var reader = new SqliteArchiveReader(databasePath);
+            return (Participants: reader.ReadParticipants(conversation.Id), Messages: reader.ReadConversationMessagesPage(conversation.Id, 0, MessagePageSize));
+        });
+        if (selection != _detailGeneration || _selectedConversationId != conversation.Id)
+        {
+            return;
+        }
+
+        var participantEntries = details.Participants.Select(participant => new WorkspaceEntry(
+            FirstRecorded(participant.NormalizedDisplayName, participant.NormalizedPhoneNumber) ?? "Participant not recorded",
+            $"Display name: {ShowRaw(participant.NormalizedDisplayName)} · Phone: {ShowRaw(participant.NormalizedPhoneNumber)}",
+            participant.Evidence.Count == 0 ? "No participant evidence rows recorded." : string.Join("\n", participant.Evidence.Select(evidence =>
+                $"{evidence.SourceType} · row {ShowRaw(evidence.SourceRowIndex?.ToString(System.Globalization.CultureInfo.InvariantCulture))} · name {ShowRaw(evidence.RawDisplayName)} · phone {ShowRaw(evidence.RawPhoneNumber)}")),
+            $"Participant ID: {participant.Id}"));
+        _selectedMessageEntries.Add(new WorkspaceEntry(
+            "Conversation details",
+            $"Kind: {conversation.Kind} · Messages: {conversation.MessageCount:N0}\nFirst timestamp: {ShowRaw(conversation.FirstTimestampUtc)} · Last timestamp: {ShowRaw(conversation.LastTimestampUtc)}",
+            $"Source page: {conversation.SourceRelativePath}\nParticipants: {ShowRaw(conversation.ParticipantSummary)}",
+            "Conversation IDs and participants remain separate as recorded by the import."));
+        _selectedMessageEntries.AddRange(participantEntries);
+        _selectedMessageEntries.AddRange(details.Messages.Items.Select(CreateMessageEntry));
+        _detailMessageOffset = details.Messages.Items.Count;
+        BrowserDetailItemsControl.ItemsSource = _selectedMessageEntries.ToArray();
+        BrowserDetailLoadMoreButton.Visibility = _detailMessageOffset < details.Messages.TotalCount ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void BrowserDetailLoadMore_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedConversationId is not long conversationId || _databasePath is null)
+        {
+            return;
+        }
+
+        BrowserDetailLoadMoreButton.IsEnabled = false;
+        var selection = _detailGeneration;
+        try
+        {
+            var databasePath = _databasePath;
+            var page = await Task.Run(() =>
+            {
+                using var reader = new SqliteArchiveReader(databasePath);
+                return reader.ReadConversationMessagesPage(conversationId, _detailMessageOffset, MessagePageSize);
+            });
+            if (selection != _detailGeneration || _selectedConversationId != conversationId)
+            {
+                return;
+            }
+
+            _selectedMessageEntries.AddRange(page.Items.Select(CreateMessageEntry));
+            _detailMessageOffset += page.Items.Count;
+            BrowserDetailItemsControl.ItemsSource = _selectedMessageEntries.ToArray();
+            BrowserDetailLoadMoreButton.Visibility = _detailMessageOffset < page.TotalCount ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception exception)
+        {
+            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't load more messages for this conversation."), isError: true);
+        }
+        finally
+        {
+            BrowserDetailLoadMoreButton.IsEnabled = true;
+        }
+    }
+
+    private static WorkspaceEntry CreateMediaDetail(StoredMediaBrowserItem media) => new(
+        media.RecordType == "source_file" ? "Source media file" : media.RecordType,
+        $"Media type: {ShowRaw(media.MediaType)} · Match status: {media.MatchStatus}\nRaw reference: {ShowRaw(media.RawReference)}",
+        $"Matched source path: {ShowRaw(media.MatchedRelativePath)}\nSource record path: {ShowRaw(media.SourceRelativePath)}\nSize: {(media.SizeBytes is null ? "(not recorded)" : FormatBytes(media.SizeBytes.Value))}",
+        $"Record ID: {media.RecordId} · Parent record ID: {ShowRaw(media.ParentRecordId?.ToString(System.Globalization.CultureInfo.InvariantCulture))} · Matched source file ID: {ShowRaw(media.MatchedSourceFileId?.ToString(System.Globalization.CultureInfo.InvariantCulture))}\nSHA-256: {ShowRaw(media.ContentSha256)}");
+
+    private static WorkspaceEntry CreateIssueDetail(StoredImportIssue issue) => new(
+        $"{issue.Severity} · {issue.Code}",
+        $"Issue ID: {issue.Id} · Source file ID: {ShowRaw(issue.SourceFileId?.ToString(System.Globalization.CultureInfo.InvariantCulture))}",
+        issue.Message,
+        FormatProvenance(issue.SourceRelativePath, issue.SourceRowIndex));
+
+    private async Task ShowMediaPreviewAsync(StoredMediaBrowserItem media)
+    {
+        var sourceFileId = media.RecordType == "source_file" ? media.RecordId : media.MatchedSourceFileId;
+        if (sourceFileId is null || _outputDirectory is null)
+        {
+            return;
+        }
+
+        var assetsDirectory = Path.Combine(_outputDirectory, "archive", "assets");
+        if (!Directory.Exists(assetsDirectory))
+        {
+            return;
+        }
+
+        var exactStem = $"sourcefile-{sourceFileId.Value}";
+        var localPath = Directory.EnumerateFiles(assetsDirectory, exactStem + ".*", SearchOption.TopDirectoryOnly)
+            .FirstOrDefault(path => string.Equals(Path.GetFileNameWithoutExtension(path), exactStem, StringComparison.Ordinal));
+        if (localPath is null || !File.Exists(localPath))
+        {
+            BrowserDetailSummaryText.Text += "\nNo exported local media preview is available for this source file.";
+            return;
+        }
+
+        try
+        {
+            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(localPath);
+            if (string.Equals(media.MediaType, "image", StringComparison.OrdinalIgnoreCase))
+            {
+                var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+                using var stream = await file.OpenAsync(Windows.Storage.FileAccessMode.Read);
+                await bitmap.SetSourceAsync(stream);
+                BrowserMediaPreviewImage.Source = bitmap;
+                BrowserMediaPreviewImage.Visibility = Visibility.Visible;
+            }
+            else if (string.Equals(media.MediaType, "audio", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(media.MediaType, "video", StringComparison.OrdinalIgnoreCase))
+            {
+                BrowserMediaPlayer.Source = Windows.Media.Core.MediaSource.CreateFromStorageFile(file);
+                BrowserMediaPlayer.Visibility = Visibility.Visible;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            BrowserDetailSummaryText.Text += $"\nLocal preview unavailable: {exception.Message}";
+        }
     }
 
     private void RefreshExportView()
@@ -604,11 +1092,10 @@ public sealed partial class MainWindow : Window
     private void RefreshControls()
     {
         var busy = _operationCancellation is not null;
-        var imported = _workspaceData is not null;
-        MessagesNavigationItem.IsEnabled = imported;
-        CallsNavigationItem.IsEnabled = imported;
-        VoicemailsNavigationItem.IsEnabled = imported;
-        MediaNavigationItem.IsEnabled = imported;
+        MessagesNavigationItem.IsEnabled = true;
+        CallsNavigationItem.IsEnabled = true;
+        VoicemailsNavigationItem.IsEnabled = true;
+        MediaNavigationItem.IsEnabled = true;
         IssuesNavigationItem.Visibility = _scanReport is null ? Visibility.Collapsed : Visibility.Visible;
         ExportNavigationItem.Visibility = _scanReport is null ? Visibility.Collapsed : Visibility.Visible;
         SelectZipButton.IsEnabled = !busy;
@@ -647,7 +1134,6 @@ public sealed partial class MainWindow : Window
         _importReport = null;
         _htmlExportSummary = null;
         _csvExportSummary = null;
-        _workspaceData = null;
         _exportIssues.Clear();
     }
 
@@ -662,102 +1148,6 @@ public sealed partial class MainWindow : Window
         {
             app.CrashLogDirectory = CrashLogPolicy.Resolve(_sourcePath, _outputDirectory);
         }
-    }
-
-    private static WorkspaceData ReadWorkspaceData(string databasePath, CancellationToken cancellationToken)
-    {
-        using var reader = new SqliteArchiveReader(databasePath);
-        var messages = new List<WorkspaceEntry>();
-        var calls = new List<WorkspaceEntry>();
-        var voicemails = new List<WorkspaceEntry>();
-        var mediaReferences = new List<WorkspaceEntry>();
-        var matchedFileIds = new HashSet<long>();
-
-        foreach (var message in reader.ReadMessages())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            messages.Add(CreateMessageEntry(message));
-            foreach (var attachment in message.Attachments)
-            {
-                if (attachment.MatchedSourceFileId is long matchedId)
-                {
-                    matchedFileIds.Add(matchedId);
-                }
-
-                mediaReferences.Add(new WorkspaceEntry(
-                    "Message attachment reference",
-                    $"Message ID: {message.Id} · Media type: {ShowRaw(attachment.MediaType)} · Match: {(attachment.MatchedSourceFileId is null ? "unresolved" : "matched")}",
-                    $"Raw reference: {ShowRaw(attachment.RawReference)}",
-                    $"Message source: {FormatProvenance(message.SourceRelativePath, message.SourceRowIndex)}\nMatched source path: {ShowRaw(attachment.MatchedRelativePath)}"));
-            }
-        }
-
-        foreach (var call in reader.ReadCalls())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            calls.Add(CreateCallEntry(call));
-            foreach (var reference in call.MediaReferences)
-            {
-                if (reference.MatchedSourceFileId is long matchedId)
-                {
-                    matchedFileIds.Add(matchedId);
-                }
-
-                mediaReferences.Add(CreateMediaReferenceEntry("Call media reference", call.SourceRelativePath, reference));
-            }
-        }
-
-        foreach (var voicemail in reader.ReadVoicemails())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            voicemails.Add(CreateVoicemailEntry(voicemail));
-            if (voicemail.MatchedAudioSourceFileId is long audioId)
-            {
-                matchedFileIds.Add(audioId);
-            }
-
-            if (voicemail.AudioReference is not null || voicemail.AudioMatchStatus != "missing_reference")
-            {
-                mediaReferences.Add(new WorkspaceEntry(
-                    "Voicemail audio reference",
-                    $"Voicemail ID: {voicemail.Id} · Match status: {voicemail.AudioMatchStatus}",
-                    $"Raw reference: {ShowRaw(voicemail.AudioReference)}",
-                    $"Source: {voicemail.SourceRelativePath}\nMatched source path: {ShowRaw(voicemail.MatchedAudioRelativePath)}"));
-            }
-
-            foreach (var reference in voicemail.MediaReferences)
-            {
-                if (reference.MatchedSourceFileId is long matchedId)
-                {
-                    matchedFileIds.Add(matchedId);
-                }
-
-                mediaReferences.Add(CreateMediaReferenceEntry("Voicemail media reference", voicemail.SourceRelativePath, reference));
-            }
-        }
-
-        var mediaFiles = reader.ReadSourceFiles()
-            .Where(file => file.MediaType is not null && MediaTypes.Contains(file.MediaType))
-            .ToArray();
-        foreach (var file in mediaFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            mediaReferences.Add(new WorkspaceEntry(
-                "Source media file",
-                $"Type: {ShowRaw(file.MediaType)} · Size: {FormatBytes(file.SizeBytes)} · {(matchedFileIds.Contains(file.Id) ? "Matched to a recorded reference" : "No matched reference in imported records")}",
-                file.RelativePath,
-                file.ContentSha256 is null ? $"Source file ID: {file.Id}" : $"Source file ID: {file.Id} · SHA-256: {file.ContentSha256}"));
-        }
-
-        var issues = reader.ReadImportIssues()
-            .Select(issue => new WorkspaceEntry(
-                issue.Severity + " · " + issue.Code,
-                $"Issue ID: {issue.Id}",
-                issue.Message,
-                FormatProvenance(issue.SourceRelativePath, issue.SourceRowIndex)))
-            .ToArray();
-
-        return new WorkspaceData(messages, calls, voicemails, mediaReferences, mediaFiles.LongLength, issues);
     }
 
     private static WorkspaceEntry CreateMessageEntry(StoredMessage message)
@@ -797,7 +1187,7 @@ public sealed partial class MainWindow : Window
         return new WorkspaceEntry(
             $"Voicemail record {voicemail.Id}",
             metadata,
-            voicemail.Transcript is null ? "Transcript not recorded." : $"Transcript: {voicemail.Transcript}",
+            string.IsNullOrWhiteSpace(voicemail.Transcript) ? "No transcript available." : $"Transcript: {voicemail.Transcript}",
             $"Source: {voicemail.SourceRelativePath}\n{media}");
     }
 
@@ -1009,13 +1399,14 @@ public sealed partial class MainWindow : Window
         _ => fallback
     };
 
-    private sealed record WorkspaceData(
-        IReadOnlyList<WorkspaceEntry> Messages,
-        IReadOnlyList<WorkspaceEntry> Calls,
-        IReadOnlyList<WorkspaceEntry> Voicemails,
-        IReadOnlyList<WorkspaceEntry> MediaReferences,
-        long MediaFileCount,
-        IReadOnlyList<WorkspaceEntry> ImportIssues);
+    private sealed record BrowserPageResult(
+        IReadOnlyList<BrowserItem> Items,
+        long TotalCount,
+        long DatabaseTotalCount,
+        int DatabaseItemCount,
+        string AppliedFilter,
+        IReadOnlyList<string>? FilterOptions);
 }
 
 public sealed record WorkspaceEntry(string Heading, string Metadata, string Body, string Evidence);
+public sealed record BrowserItem(string RecordType, long Id, string Heading, string Metadata, string Body, string Evidence, object? Data);

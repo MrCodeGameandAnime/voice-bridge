@@ -4,6 +4,32 @@ namespace VoiceBridge.Storage;
 
 public sealed record StoredArchiveMetadata(SourceKind SourceKind, string SourcePath, string? SourceSha256);
 
+public sealed record StoredPage<T>(IReadOnlyList<T> Items, long TotalCount);
+
+public sealed record StoredConversationBrowserRow(
+    long Id,
+    string? RawLabel,
+    string Kind,
+    string SourceRelativePath,
+    long MessageCount,
+    string? FirstTimestampUtc,
+    string? LastTimestampUtc,
+    string? Preview,
+    string ParticipantSummary);
+
+public sealed record StoredMediaBrowserItem(
+    string RecordType,
+    long RecordId,
+    long? ParentRecordId,
+    string? RawReference,
+    long? MatchedSourceFileId,
+    string? MatchedRelativePath,
+    string? MediaType,
+    string MatchStatus,
+    string? SourceRelativePath,
+    long? SizeBytes,
+    string? ContentSha256);
+
 public sealed record StoredConversationSummary(
     long Id,
     long? SourceFileId,
