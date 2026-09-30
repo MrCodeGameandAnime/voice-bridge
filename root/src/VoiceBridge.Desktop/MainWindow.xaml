@@ -188,9 +188,9 @@
                             <TextBlock x:Name="BrowserTitleText" Text="Messages" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                             <TextBlock x:Name="BrowserSummaryText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         </StackPanel>
-                        <Grid Grid.Row="1" Margin="0,0,0,12" ColumnDefinitions="*,220,Auto" ColumnSpacing="10">
+                        <Grid Grid.Row="1" Margin="0,0,0,12" ColumnDefinitions="*,260,Auto" ColumnSpacing="10">
                             <TextBox x:Name="BrowserSearchBox" PlaceholderText="Search this archive" TextChanged="BrowserSearch_TextChanged" AutomationProperties.Name="Search archive records" />
-                            <ComboBox x:Name="BrowserFilterBox" Grid.Column="1" MinWidth="180" SelectionChanged="BrowserFilter_SelectionChanged" AutomationProperties.Name="Filter archive records" />
+                            <ComboBox x:Name="BrowserFilterBox" Grid.Column="1" MinWidth="220" DisplayMemberPath="Label" SelectionChanged="BrowserFilter_SelectionChanged" AutomationProperties.Name="Filter and sort archive records" ToolTipService.ToolTip="Choose a filter and sort order. Media references use their related record timestamp; source-only files without one stay last." />
                             <Button x:Name="BrowserLoadMoreButton" Grid.Column="2" Content="Load more" Click="BrowserLoadMore_Click" Visibility="Collapsed" />
                         </Grid>
                         <Grid x:Name="BrowserPaneGrid" Grid.Row="2" ColumnSpacing="0" SizeChanged="BrowserPaneGrid_SizeChanged">
@@ -203,9 +203,9 @@
                                 <ListView x:Name="BrowserListView" ItemTemplate="{StaticResource BrowserEntryTemplate}" SelectionMode="Single" SelectionChanged="BrowserList_SelectionChanged" Background="Transparent" AutomationProperties.Name="Archive records" />
                                 <TextBlock x:Name="BrowserListFooterText" Grid.Row="1" Margin="8,5" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                             </Grid>
-                            <Button x:Name="BrowserPaneSplitter" Grid.Column="1" Width="8" MinWidth="8" Padding="0" Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" VerticalAlignment="Stretch" AutomationProperties.Name="Resize list and detail panes" AutomationProperties.HelpText="Drag this divider, or focus it and press the Left or Right arrow key to resize the panes." PointerPressed="BrowserPaneSplitter_PointerPressed" PointerMoved="BrowserPaneSplitter_PointerMoved" PointerReleased="BrowserPaneSplitter_PointerReleased" PointerCaptureLost="BrowserPaneSplitter_PointerCaptureLost" KeyDown="BrowserPaneSplitter_KeyDown">
+                            <ContentControl x:Name="BrowserPaneSplitter" Grid.Column="1" Width="8" MinWidth="8" Padding="0" Background="Transparent" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" VerticalAlignment="Stretch" IsTabStop="True" AutomationProperties.Name="Resize list and detail panes" AutomationProperties.HelpText="Drag this divider, or focus it and press the Left or Right arrow key to resize the panes." PointerPressed="BrowserPaneSplitter_PointerPressed" PointerMoved="BrowserPaneSplitter_PointerMoved" PointerReleased="BrowserPaneSplitter_PointerReleased" PointerCaptureLost="BrowserPaneSplitter_PointerCaptureLost" KeyDown="BrowserPaneSplitter_KeyDown" Visibility="Collapsed">
                                 <Border Width="3" Height="44" CornerRadius="2" Background="{ThemeResource TextFillColorSecondaryBrush}" />
-                            </Button>
+                            </ContentControl>
                             <ScrollViewer x:Name="BrowserDetailPanel" Grid.Column="2" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                                 <StackPanel Spacing="10">
                                     <TextBlock x:Name="BrowserDetailTitleText" FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />

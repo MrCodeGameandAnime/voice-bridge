@@ -515,16 +515,19 @@ public sealed partial class MainWindow : Window
         BrowserTitleText.Text = _currentViewName;
         BrowserSearchBox.Text = string.Empty;
         BrowserSearchBox.PlaceholderText = _currentViewName == "Issues" ? "Search issue code, text, or source path" : $"Search {_currentViewName.ToLowerInvariant()}";
-        BrowserFilterBox.ItemsSource = _currentViewName switch
+        var filters = _currentViewName switch
         {
             "Messages" => new[] { "All", "With attachments", "Groups" },
             "Media" => new[] { "All", "Image", "Video", "Audio", "Unresolved" },
             _ => new[] { "All" }
         };
-        BrowserFilterBox.SelectedIndex = 0;
-        BrowserFilterBox.Visibility = _currentViewName == "Voicemails" ? Visibility.Collapsed : Visibility.Visible;
+        var options = BrowserViewOption.CreateOptions(_currentViewName, filters);
+        BrowserFilterBox.ItemsSource = options;
+        BrowserFilterBox.SelectedItem = options.FirstOrDefault(option => option.Filter == "All" && option.NewestFirst);
+        BrowserFilterBox.Visibility = Visibility.Visible;
         BrowserSearchBox.Visibility = _currentViewName == "Issues" || (_databasePath is not null && File.Exists(_databasePath)) ? Visibility.Visible : Visibility.Collapsed;
         BrowserLoadMoreButton.Visibility = Visibility.Collapsed;
+        BrowserPaneSplitter.Visibility = Visibility.Collapsed;
         BrowserListPanel.Visibility = Visibility.Visible;
         BrowserDetailPanel.Visibility = Visibility.Collapsed;
         BrowserBuildRequiredPanel.Visibility = Visibility.Collapsed;
@@ -569,6 +572,7 @@ public sealed partial class MainWindow : Window
             _localBrowserOffset = 0;
             _browserTotalCount = 0;
             _selectedConversationId = null;
+            BrowserPaneSplitter.Visibility = Visibility.Collapsed;
             BrowserDetailPanel.Visibility = Visibility.Collapsed;
             BrowserMediaPreviewImage.Visibility = Visibility.Collapsed;
             BrowserMediaPlayer.Visibility = Visibility.Collapsed;
@@ -577,7 +581,9 @@ public sealed partial class MainWindow : Window
         var generation = _browserGeneration;
         var databasePath = _databasePath;
         var search = BrowserSearchBox.Text;
-        var filter = BrowserFilterBox.SelectedItem as string ?? "All";
+        var selectedOption = BrowserFilterBox.SelectedItem as BrowserViewOption;
+        var filter = selectedOption?.Filter ?? "All";
+        var newestFirst = selectedOption?.NewestFirst ?? true;
         var view = _currentViewName;
         var isImported = databasePath is not null && File.Exists(databasePath);
         if (!isImported && view is ("Messages" or "Calls" or "Voicemails" or "Media"))
@@ -594,13 +600,15 @@ public sealed partial class MainWindow : Window
             BrowserSearchBox.Visibility = Visibility.Collapsed;
             BrowserFilterBox.Visibility = Visibility.Collapsed;
             BrowserLoadMoreButton.Visibility = Visibility.Collapsed;
+            BrowserPaneSplitter.Visibility = Visibility.Collapsed;
             return;
         }
 
         BrowserListPanel.Visibility = Visibility.Visible;
+        BrowserPaneSplitter.Visibility = Visibility.Collapsed;
         BrowserBuildRequiredPanel.Visibility = Visibility.Collapsed;
         BrowserSearchBox.Visibility = Visibility.Visible;
-        BrowserFilterBox.Visibility = view == "Voicemails" ? Visibility.Collapsed : Visibility.Visible;
+        BrowserFilterBox.Visibility = Visibility.Visible;
         BrowserTitleText.Text = view;
         BrowserDetailPanel.Visibility = Visibility.Visible;
         BrowserDetailTitleText.Text = $"Select a {view switch { "Messages" => "conversation", "Calls" => "call", "Voicemails" => "voicemail", "Media" => "media item", _ => "finding" }}";
@@ -639,7 +647,7 @@ public sealed partial class MainWindow : Window
             var localRemaining = Math.Max(0, localCount - _localBrowserOffset);
             var localTake = Math.Min(BrowserPageSize, localRemaining);
             var remainingPageSize = Math.Max(1, BrowserPageSize - localTake);
-            var page = await Task.Run(() => ReadBrowserPage(databasePath!, view, search, filter, _databaseOffset, remainingPageSize));
+            var page = await Task.Run(() => ReadBrowserPage(databasePath!, view, search, filter, newestFirst, _databaseOffset, remainingPageSize));
             if (generation != _browserGeneration || view != _currentViewName)
             {
                 return;
@@ -658,11 +666,17 @@ public sealed partial class MainWindow : Window
                     }
                 }
 
+                var browserOptions = BrowserViewOption.CreateOptions(view, filterOptions);
+                var nextOption = browserOptions.FirstOrDefault(option => option.Filter == filter && option.NewestFirst == newestFirst)
+                    ?? browserOptions.FirstOrDefault(option => option.Filter == "All" && option.NewestFirst == newestFirst)
+                    ?? browserOptions.FirstOrDefault(option => option.Filter == "All")
+                    ?? browserOptions.First();
                 _suppressBrowserEvents = true;
-                BrowserFilterBox.ItemsSource = filterOptions;
-                BrowserFilterBox.SelectedItem = filterOptions.Contains(filter, StringComparer.Ordinal) ? filter : "All";
+                BrowserFilterBox.ItemsSource = browserOptions;
+                BrowserFilterBox.SelectedItem = nextOption;
                 _suppressBrowserEvents = false;
-                filter = BrowserFilterBox.SelectedItem as string ?? "All";
+                filter = nextOption.Filter;
+                newestFirst = nextOption.NewestFirst;
                 if (filter != page.AppliedFilter)
                 {
                     _ = LoadBrowserPageAsync(reset: true);
@@ -724,31 +738,38 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static BrowserPageResult ReadBrowserPage(string databasePath, string view, string? search, string filter, int offset, int pageSize)
+    private static BrowserPageResult ReadBrowserPage(
+        string databasePath,
+        string view,
+        string? search,
+        string filter,
+        bool newestFirst,
+        int offset,
+        int pageSize)
     {
         using var reader = new SqliteArchiveReader(databasePath);
         switch (view)
         {
             case "Messages":
             {
-                var page = reader.ReadConversationPage(search, filter, offset, pageSize);
+                var page = reader.ReadConversationPage(search, filter, offset, pageSize, newestFirst);
                 return new BrowserPageResult(page.Items.Select(CreateConversationBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, filter, null);
             }
             case "Calls":
             {
                 var filters = new[] { "All" }.Concat(reader.ReadCallEventTypes()).ToArray();
                 var appliedFilter = filters.Contains(filter, StringComparer.Ordinal) ? filter : "All";
-                var page = reader.ReadCallPage(search, appliedFilter, offset, pageSize);
+                var page = reader.ReadCallPage(search, appliedFilter, offset, pageSize, newestFirst);
                 return new BrowserPageResult(page.Items.Select(CreateCallBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, appliedFilter, filters);
             }
             case "Voicemails":
             {
-                var page = reader.ReadVoicemailPage(search, offset, pageSize);
+                var page = reader.ReadVoicemailPage(search, offset, pageSize, newestFirst);
                 return new BrowserPageResult(page.Items.Select(CreateVoicemailBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, "All", null);
             }
             case "Media":
             {
-                var page = reader.ReadMediaPage(search, filter, offset, pageSize);
+                var page = reader.ReadMediaPage(search, filter, offset, pageSize, newestFirst);
                 var summary = reader.ReadMediaBrowserSummary();
                 return new BrowserPageResult(page.Items.Select(CreateMediaBrowserItem).ToArray(), page.TotalCount, page.TotalCount, page.Items.Count, filter, null, summary);
             }
@@ -873,6 +894,7 @@ public sealed partial class MainWindow : Window
 
         var selection = ++_detailGeneration;
         BrowserDetailPanel.Visibility = Visibility.Visible;
+        BrowserPaneSplitter.Visibility = _importReport is null ? Visibility.Collapsed : Visibility.Visible;
         BrowserDetailLoadMoreButton.Visibility = Visibility.Collapsed;
         BrowserMediaPreviewImage.Visibility = Visibility.Collapsed;
         BrowserMediaPlayer.Source = null;
@@ -1114,10 +1136,20 @@ public sealed partial class MainWindow : Window
 
     private void BrowserPaneSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (!e.GetCurrentPoint(BrowserPaneGrid).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        if (!BrowserPaneSplitter.CapturePointer(e.Pointer))
+        {
+            return;
+        }
+
         _isResizingBrowserPane = true;
         _browserResizeStartX = e.GetCurrentPoint(BrowserPaneGrid).Position.X;
         _browserResizeStartWidth = BrowserListColumn.ActualWidth;
-        BrowserPaneSplitter.CapturePointer(e.Pointer);
+        BrowserPaneSplitter.Focus(FocusState.Pointer);
         e.Handled = true;
     }
 
@@ -1129,7 +1161,13 @@ public sealed partial class MainWindow : Window
         }
 
         var currentX = e.GetCurrentPoint(BrowserPaneGrid).Position.X;
-        ApplyBrowserListWidth(_browserResizeStartWidth + currentX - _browserResizeStartX, BrowserPaneGrid.ActualWidth);
+        ApplyBrowserListWidth(
+            BrowserPaneSizing.WidthAfterPointerDrag(
+                _browserResizeStartWidth,
+                _browserResizeStartX,
+                currentX,
+                BrowserPaneGrid.ActualWidth),
+            BrowserPaneGrid.ActualWidth);
         e.Handled = true;
     }
 

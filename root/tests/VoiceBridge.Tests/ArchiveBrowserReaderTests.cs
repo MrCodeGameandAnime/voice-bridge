@@ -84,6 +84,34 @@ public sealed class ArchiveBrowserReaderTests
         Assert.Equal(summary.ReferenceCount + summary.SourceMediaFileCount, page.TotalCount);
     }
 
+    [Fact]
+    public async Task RecordBrowsersSortNewestAndOldestByRecordedTimestamp()
+    {
+        using var temporary = new TemporaryDirectory();
+        var databasePath = await ImportFixtureAsync(temporary.RootPath);
+        using var reader = new SqliteArchiveReader(databasePath);
+
+        var newestMessages = reader.ReadConversationPage(null, "All", 0, 10, newestFirst: true);
+        var oldestMessages = reader.ReadConversationPage(null, "All", 0, 10, newestFirst: false);
+        var newestCalls = reader.ReadCallPage(null, "All", 0, 10, newestFirst: true);
+        var oldestCalls = reader.ReadCallPage(null, "All", 0, 10, newestFirst: false);
+        var newestVoicemails = reader.ReadVoicemailPage(null, 0, 10, newestFirst: true);
+        var oldestVoicemails = reader.ReadVoicemailPage(null, 0, 10, newestFirst: false);
+        var newestMedia = reader.ReadMediaPage(null, "All", 0, 20, newestFirst: true);
+        var oldestMedia = reader.ReadMediaPage(null, "All", 0, 20, newestFirst: false);
+
+        Assert.Contains("Newest Message - Text", newestMessages.Items[0].SourceRelativePath, StringComparison.Ordinal);
+        Assert.Contains("Oldest Message - Text", oldestMessages.Items[0].SourceRelativePath, StringComparison.Ordinal);
+        Assert.Contains("Newest Caller - Received", newestCalls.Items[0].SourceRelativePath, StringComparison.Ordinal);
+        Assert.Contains("Oldest Caller - Received", oldestCalls.Items[0].SourceRelativePath, StringComparison.Ordinal);
+        Assert.Contains("Newest Caller - Voicemail", newestVoicemails.Items[0].SourceRelativePath, StringComparison.Ordinal);
+        Assert.Contains("Oldest Caller - Voicemail", oldestVoicemails.Items[0].SourceRelativePath, StringComparison.Ordinal);
+        Assert.Equal("voicemail_media", newestMedia.Items[0].RecordType);
+        Assert.Equal("message_attachment", oldestMedia.Items[0].RecordType);
+        Assert.Equal("source_file", newestMedia.Items[^1].RecordType);
+        Assert.Equal("source_file", oldestMedia.Items[^1].RecordType);
+    }
+
     private static async Task<string> ImportFixtureAsync(string root)
     {
         var zipPath = Path.Combine(root, "takeout.zip");
@@ -97,11 +125,29 @@ public sealed class ArchiveBrowserReaderTests
                   <div class="message"><abbr class="dt" title="2024-01-02T03:05:05+00:00"></abbr><a class="tel" href="tel:+15551234567">Alex</a><q>Second body with search marker</q></div>
                 </body></html>
                 """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Oldest Message - Text - 2024-01-01T00_00_00Z.html", """
+                <html><body><div class="message"><abbr class="dt" title="2024-01-01T00:00:00Z"></abbr><a class="tel" href="tel:+15551234560">Oldest Sender</a><q>Oldest message</q></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Newest Message - Text - 2024-01-04T00_00_00Z.html", """
+                <html><body><div class="message"><abbr class="dt" title="2024-01-04T00:00:00Z"></abbr><a class="tel" href="tel:+15551234561">Newest Sender</a><q>Newest message</q></div></body></html>
+                """);
             WriteEntry(archive, "Takeout/Voice/Calls/Caller One - Received - 2024-01-02T03_04_05Z.html", """
                 <html><body><div class="haudio"><span class="fn">Received call from Caller One</span><a class="tel" href="tel:+15550001111">Caller One</a><abbr class="published" title="2024-01-02T03:04:05-05:00"></abbr><audio src="call-recording.mp3"></audio></div></body></html>
                 """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Oldest Caller - Received - 2024-01-01T00_00_00Z.html", """
+                <html><body><div class="haudio"><span class="fn">Received call from Oldest Caller</span><a class="tel" href="tel:+15550001112">Oldest Caller</a><abbr class="published" title="2024-01-01T00:00:00Z"></abbr></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Newest Caller - Received - 2024-01-04T00_00_00Z.html", """
+                <html><body><div class="haudio"><span class="fn">Received call from Newest Caller</span><a class="tel" href="tel:+15550001113">Newest Caller</a><abbr class="published" title="2024-01-04T00:00:00Z"></abbr></div></body></html>
+                """);
             WriteEntry(archive, "Takeout/Voice/Calls/Caller Two - Voicemail - 2024-01-03T03_04_05Z.html", """
                 <html><body><div class="haudio"><span class="fn">Voicemail from Caller Two</span><a class="tel" href="tel:+15550002222">Caller Two</a><abbr class="published" title="2024-01-03T03:04:05-05:00"></abbr><span class="full-text">distinct transcript phrase</span><audio src="missing-vm.mp3"></audio></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Oldest Caller - Voicemail - 2024-01-01T00_00_00Z.html", """
+                <html><body><div class="haudio"><span class="fn">Voicemail from Oldest Caller</span><a class="tel" href="tel:+15550002223">Oldest Caller</a><abbr class="published" title="2024-01-01T00:00:00Z"></abbr><span class="full-text">Oldest voicemail</span></div></body></html>
+                """);
+            WriteEntry(archive, "Takeout/Voice/Calls/Newest Caller - Voicemail - 2024-01-05T00_00_00Z.html", """
+                <html><body><div class="haudio"><span class="fn">Voicemail from Newest Caller</span><a class="tel" href="tel:+15550002224">Newest Caller</a><abbr class="published" title="2024-01-05T00:00:00Z"></abbr><span class="full-text">Newest voicemail</span></div></body></html>
                 """);
             WriteEntry(archive, "Takeout/Voice/Calls/unsupported.html", "<html><body><abbr class=\"published\"></abbr></body></html>");
             WriteEntry(archive, "Takeout/Voice/media/photo.jpg", "image");

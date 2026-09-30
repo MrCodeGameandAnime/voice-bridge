@@ -103,6 +103,13 @@ public sealed class WorkspaceStatusPresentationTests
         Assert.Equal(592, BrowserPaneSizing.AdjustListWidth(590, 900, 1));
     }
 
+    [Fact]
+    public void BrowserPanePointerDragAppliesPointerDeltaAndKeepsMinimumWidths()
+    {
+        Assert.Equal(460, BrowserPaneSizing.WidthAfterPointerDrag(380, 120, 200, 900));
+        Assert.Equal(220, BrowserPaneSizing.WidthAfterPointerDrag(380, 120, -400, 900));
+    }
+
     private static ScanReport CreateScanReport(int warningCount) => new(
         "takeout.zip",
         SourceKind.ZipArchive,

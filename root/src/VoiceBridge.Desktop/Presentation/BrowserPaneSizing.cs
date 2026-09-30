@@ -22,4 +22,11 @@ internal static class BrowserPaneSizing
 
     public static double AdjustListWidth(double currentWidth, double availableWidth, int direction) =>
         ClampListWidth(currentWidth + Math.Sign(direction) * KeyboardResizeStep, availableWidth);
+
+    public static double WidthAfterPointerDrag(
+        double startWidth,
+        double startX,
+        double currentX,
+        double availableWidth) =>
+        ClampListWidth(startWidth + currentX - startX, availableWidth);
 }
