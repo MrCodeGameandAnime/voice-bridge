@@ -9,10 +9,21 @@ This package is self-contained for .NET and the Windows App SDK, targets x64 Win
 ## Other distribution options
 
 - **Direct installer:** deferred. The portable package already provides a reversible install and clean folder removal, while a conventional installer would add machine-level install and uninstall behavior that the current product does not need.
-- **MSIX:** deferred. It can provide package identity and managed installation, but requires package validation and an appropriate signing identity for direct distribution.
+- **MSIX:** an unsigned x64 test package can now be built for local packaging validation. A signed package for installation or direct distribution remains deferred until an appropriate signing identity is available.
 - **Microsoft Store:** evaluated as a later option only. Store submission, listing, and distribution are outside this gate and are not performed here.
 
 No signing key or external account is used for this release candidate.
+
+## Build an unsigned test MSIX
+
+Run these commands from the repository root in a Visual Studio Developer PowerShell with the Windows SDK and .NET workloads installed. Restore the desktop project once, then build the test package:
+
+```powershell
+dotnet restore root/src/VoiceBridge.Desktop/VoiceBridge.Desktop.csproj
+./root/scripts/package-msix.ps1 -OutputDirectory root\output\msix-test -Version 1.0.0
+```
+
+The result is `VoiceBridge-1.0.0-win-x64-unsigned.msix` under the chosen output directory. The package uses the local test identity `404Builds.VoiceBridge.Local`, contains no signing certificate or signature block, and is not installed by the script. The script checks the generated identity and version, required app files and artwork, and asks the Windows SDK MakeAppx tool to validate the package. It only writes beneath `root/output/`, refuses to overwrite an existing package, and prints the final path, byte size, and SHA-256.
 
 ## Rebuild the release ZIP
 

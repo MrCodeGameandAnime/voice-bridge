@@ -6,7 +6,10 @@
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <WindowsSdkPackageVersion>10.0.26100.57</WindowsSdkPackageVersion>
-    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsPackageType Condition="'$(VoiceBridgeBuildMsix)' == 'true'">MSIX</WindowsPackageType>
+    <WindowsPackageType Condition="'$(VoiceBridgeBuildMsix)' != 'true'">None</WindowsPackageType>
+    <EnableMsixTooling Condition="'$(VoiceBridgeBuildMsix)' == 'true'">true</EnableMsixTooling>
+    <PublishProfile Condition="'$(VoiceBridgeBuildMsix)' == 'true'">Properties\PublishProfiles\win10-x64.pubxml</PublishProfile>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -19,7 +22,7 @@
     <Product>VoiceBridge</Product>
     <Description>Keep a local, browsable archive of your Google Voice Takeout.</Description>
     <Copyright>Copyright © 2026 404 Builds</Copyright>
-    <ApplicationIcon>Assets\VoiceBridge.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -29,7 +32,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\VoiceBridgeMark.png">
+    <Content Include="Assets\*.png" />
+    <Content Update="Assets\Square150x150Logo.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>

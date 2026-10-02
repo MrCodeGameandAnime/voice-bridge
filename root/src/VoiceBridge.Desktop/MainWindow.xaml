@@ -42,7 +42,7 @@
         <NavigationView.PaneHeader>
             <StackPanel Padding="18,18,18,10" Spacing="14">
                 <Grid ColumnDefinitions="48,*" ColumnSpacing="12">
-                    <Image Source="ms-appx:///Assets/VoiceBridgeMark.png" Width="44" Height="44" VerticalAlignment="Center" AutomationProperties.Name="VoiceBridge icon" />
+                    <Image Source="ms-appx:///Assets/Square150x150Logo.png" Width="44" Height="44" VerticalAlignment="Center" AutomationProperties.Name="VoiceBridge icon" />
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="VoiceBridge" FontSize="20" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                         <TextBlock Text="Google Voice" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

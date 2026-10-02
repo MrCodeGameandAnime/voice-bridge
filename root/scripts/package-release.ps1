@@ -116,13 +116,13 @@ try
     $stageCreated = $true
     Assert-NoOutputReparsePoints $publishPath
 
-    & $msbuildCommand.Source $projectPath /t:Publish /p:Configuration=Release /p:RuntimeIdentifier=win-x64 /p:SelfContained=true "/p:PublishDir=$publishPath\" /p:PublishSingleFile=false /m /v:minimal
+    & $msbuildCommand.Source $projectPath /t:Publish /p:Configuration=Release /p:RuntimeIdentifier=win-x64 /p:SelfContained=true "/p:PublishDir=$publishPath/" /p:PublishSingleFile=false /m /v:minimal
     if ($LASTEXITCODE -ne 0)
     {
         throw "Self-contained Release publish failed with exit code $LASTEXITCODE."
     }
 
-    foreach ($requiredFile in @('VoiceBridge.exe', 'VoiceBridge.pri', 'Assets\VoiceBridgeMark.png'))
+    foreach ($requiredFile in @('VoiceBridge.exe', 'VoiceBridge.pri', 'Assets\Square150x150Logo.png'))
     {
         if (-not (Test-Path -LiteralPath (Join-Path $publishPath $requiredFile) -PathType Leaf))
         {
