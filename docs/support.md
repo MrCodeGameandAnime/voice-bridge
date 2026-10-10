@@ -22,6 +22,6 @@ Use **View Issues** to inspect warnings and errors with their source file and ro
 
 An unhandled application failure may leave a `voicebridge-crash-*.txt` file in the selected output folder. The log is local and is never sent automatically. Review it before sharing because it may include exception details and local file paths. If no output folder was selected, or the output would be inside an extracted Takeout source, VoiceBridge does not write a crash log.
 
-## Sharing a problem report
+## Sharing a problem report 
 
 Use the VoiceBridge support channel provided with the build you received. Include the VoiceBridge version shown in the window or **About**, Windows version, the step that failed, and relevant issue codes or a reviewed crash log. Do not include the Takeout ZIP, database, full HTML archive, message text, phone numbers, or media unless you have reviewed the contents and intentionally chosen to share them.
