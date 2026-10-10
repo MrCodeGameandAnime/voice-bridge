@@ -149,7 +149,7 @@ try
     }
 
     $docsRoot = Join-Path $repositoryRoot 'docs'
-    $documentationFiles = @('privacy.md', 'support.md', 'release.md')
+    $documentationFiles = @('privacy.md', 'support.md')
     foreach ($document in $documentationFiles)
     {
         if (-not (Test-Path -LiteralPath (Join-Path $docsRoot $document) -PathType Leaf))

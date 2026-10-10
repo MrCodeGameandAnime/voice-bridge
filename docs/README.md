@@ -4,23 +4,18 @@
 
 **Your Google Voice history, kept local.** Open a Google Voice Takeout to browse messages, calls, voicemails, media, and import issues on your PC. Build a local database, report, and offline HTML archive when you are ready to export.
 
+## Get Voice Bridge
+
+[Get Voice Bridge from the Microsoft Store](https://apps.microsoft.com/detail/9N6KNRV562N8?hl=en-us&gl=US).
+The Microsoft Store is the supported customer distribution channel.
+
+Installing or removing the app does not change your original Takeout or delete files you created in an export destination. Manage those files separately.
+
 ## Windows requirements
 
 - 64-bit Windows 10, version 2004 (build 19041) or later, or Windows 11.
 - Enough free disk space for the application, the local database and report, and the generated HTML archive. Required space depends on the size and media content of the Takeout.
 - A Google Voice Takeout ZIP file, or a folder extracted from that ZIP.
-
-The portable release is an x64 ZIP with the .NET and Windows App SDK runtime files included. It does not require a separate installer or administrator access.
-
-See [the release strategy](release.md) for the distribution and signing trade-offs.
-
-## Install and remove
-
-1. Extract the Voice Bridge ZIP to a folder you control, such as `Documents\VoiceBridge`.
-2. Run `VoiceBridge.exe` from that folder.
-3. To remove the application, close Voice Bridge and delete the extracted application folder.
-
-The portable application does not install a service or register an uninstaller. Removing its folder does not remove your Takeout, output folder, database, HTML archive, report, or any local crash log. Back up or remove those files separately if you want to.
 
 ## Open and browse a Takeout
 

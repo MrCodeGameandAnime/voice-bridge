@@ -1,6 +1,7 @@
 /takeout-*.zip
 /Takeout/
 /root/output/
+*.zip
 
 # .NET build and test output
 **/bin/
