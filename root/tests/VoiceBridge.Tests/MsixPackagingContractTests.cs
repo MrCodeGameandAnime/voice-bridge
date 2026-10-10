@@ -9,7 +9,7 @@ public sealed class MsixPackagingContractTests
     private static readonly XNamespace RestrictedCapabilitiesNamespace = "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities";
 
     [Fact]
-    public void PackageManifest_UsesUnsignedDevelopmentIdentity()
+    public void PackageManifest_UsesStoreIdentity()
     {
         var repositoryRoot = FindRepositoryRoot();
         var manifestPath = Path.Combine(repositoryRoot, "root", "src", "VoiceBridge.Desktop", "Package.appxmanifest");
@@ -19,8 +19,8 @@ public sealed class MsixPackagingContractTests
         var identity = manifest.Root?.Element(PackageNamespace + "Identity");
 
         Assert.NotNull(identity);
-        Assert.Equal("404Builds.VoiceBridge.Local", (string?)identity.Attribute("Name"));
-        Assert.Equal("CN=404 Builds, OID.2.25.311729368913984317654407730594956997722=1", (string?)identity.Attribute("Publisher"));
+        Assert.Equal("404Builds.VoiceBridge", (string?)identity.Attribute("Name"));
+        Assert.Equal("CN=2BB531F8-77DD-4D82-AA5F-230F26EB09EE", (string?)identity.Attribute("Publisher"));
         Assert.Equal("1.0.0.0", (string?)identity.Attribute("Version"));
     }
 

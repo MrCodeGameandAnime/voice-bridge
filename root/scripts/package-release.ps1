@@ -79,6 +79,24 @@ function Add-ZipEntry(
     }
 }
 
+function Add-ZipTextEntry(
+    [System.IO.Compression.ZipArchive]$Archive,
+    [string]$EntryPath,
+    [string]$Content)
+{
+    $entry = $Archive.CreateEntry($EntryPath, [System.IO.Compression.CompressionLevel]::Optimal)
+    $entryStream = $entry.Open()
+    $writer = [System.IO.StreamWriter]::new($entryStream, [System.Text.UTF8Encoding]::new($false))
+    try
+    {
+        $writer.Write($Content)
+    }
+    finally
+    {
+        $writer.Dispose()
+    }
+}
+
 if ($Version -notmatch '^\d+\.\d+\.\d+$')
 {
     throw "Version must use major.minor.patch format; received '$Version'."
@@ -131,7 +149,7 @@ try
     }
 
     $docsRoot = Join-Path $repositoryRoot 'docs'
-    $documentationFiles = @('README.md', 'privacy.md', 'support.md', 'release.md')
+    $documentationFiles = @('privacy.md', 'support.md', 'release.md')
     foreach ($document in $documentationFiles)
     {
         if (-not (Test-Path -LiteralPath (Join-Path $docsRoot $document) -PathType Leaf))
@@ -140,8 +158,17 @@ try
         }
     }
 
-    $screenshotsRoot = Join-Path $docsRoot 'screenshots'
-    $screenshotNames = @('welcome.png', 'scan-summary.png', 'import-results.png')
+    $brandingPath = Join-Path $repositoryRoot 'root\res\takeout_stack.png'
+    if (-not (Test-Path -LiteralPath $brandingPath -PathType Leaf))
+    {
+        throw "Release branding image is missing: $brandingPath"
+    }
+
+    $screenshotsRoot = Join-Path $repositoryRoot 'root\res\screenshots'
+    $screenshotNames = @(
+        'Screenshot 2026-10-06 072425.png',
+        'Screenshot 2026-10-06 075921.png',
+        'Screenshot 2026-10-06 075846.png')
     foreach ($screenshot in $screenshotNames)
     {
         if (-not (Test-Path -LiteralPath (Join-Path $screenshotsRoot $screenshot) -PathType Leaf))
@@ -181,15 +208,23 @@ try
         $entryCount++
     }
 
+    $readmeContents = [System.IO.File]::ReadAllText((Join-Path $docsRoot 'README.md'))
+    $packagedReadmeContents = $readmeContents.Replace('../root/res/', 'root/res/')
+    Add-ZipTextEntry $archive 'README.md' $packagedReadmeContents
+    $entryCount++
+
     foreach ($document in $documentationFiles)
     {
         Add-ZipEntry $archive (Join-Path $docsRoot $document) $document
         $entryCount++
     }
 
+    Add-ZipEntry $archive $brandingPath 'root/res/takeout_stack.png'
+    $entryCount++
+
     foreach ($screenshot in $screenshotNames)
     {
-        Add-ZipEntry $archive (Join-Path $screenshotsRoot $screenshot) "screenshots/$screenshot"
+        Add-ZipEntry $archive (Join-Path $screenshotsRoot $screenshot) "root/res/screenshots/$screenshot"
         $entryCount++
     }
 
