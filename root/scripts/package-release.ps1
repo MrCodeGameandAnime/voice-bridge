@@ -122,7 +122,7 @@ try
         throw "Self-contained Release publish failed with exit code $LASTEXITCODE."
     }
 
-    foreach ($requiredFile in @('VoiceBridge.exe', 'VoiceBridge.pri', 'Assets\Square150x150Logo.png'))
+    foreach ($requiredFile in @('VoiceBridge.exe', 'VoiceBridge.pri', 'Assets\AppIcon.ico', 'Assets\Square150x150Logo.png'))
     {
         if (-not (Test-Path -LiteralPath (Join-Path $publishPath $requiredFile) -PathType Leaf))
         {

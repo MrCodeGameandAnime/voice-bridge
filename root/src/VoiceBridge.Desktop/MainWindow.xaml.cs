@@ -58,11 +58,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = "VoiceBridge";
-        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
-        VersionAttributionText.Text = $"404 Builds · VoiceBridge {version}";
+        Title = "Voice Bridge";
         var windowHandle = WindowNative.GetWindowHandle(this);
         var appWindow = AppWindow.GetFromWindowId(Win32Interop.GetWindowIdFromWindow(windowHandle));
+        appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         appWindow.Resize(new SizeInt32(1320, 900));
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread()
             ?? throw new InvalidOperationException("The UI dispatcher is unavailable.");
@@ -131,7 +130,7 @@ public sealed partial class MainWindow : Window
                 _outputDirectory = Path.GetFullPath(folder.Path);
                 ClearImportedState();
                 UpdateCrashLogDirectory();
-                SetStatus("Destination selected. VoiceBridge will write generated files only after you choose Build local archive.");
+                SetStatus("Destination selected. Voice Bridge will write generated files only after you choose Build local archive.");
                 RefreshWorkspace();
             }
         }
@@ -173,7 +172,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't scan that source. Check that it is readable and try again."), isError: true);
+            SetStatus(GetUserMessage(exception, "Voice Bridge couldn't scan that source. Check that it is readable and try again."), isError: true);
         }
         finally
         {
@@ -207,7 +206,7 @@ public sealed partial class MainWindow : Window
             SourceOutputPathValidator.EnsureOutputOutsideDirectorySource(sourcePath, outputDirectory);
             if (File.Exists(databasePath) || File.Exists(reportPath) || Directory.Exists(archiveDirectory))
             {
-                SetStatus("This destination already contains VoiceBridge output. Choose a destination without voicebridge.db, import-report.json, or archive so existing files are preserved.", isError: true);
+                SetStatus("This destination already contains Voice Bridge output. Choose a destination without voicebridge.db, import-report.json, or archive so existing files are preserved.", isError: true);
                 RefreshWorkspace();
                 return;
             }
@@ -251,7 +250,7 @@ public sealed partial class MainWindow : Window
         catch (Exception exception)
         {
             _exportIssues.Add(CreateOperationIssue("Build operation stopped", exception));
-            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't complete the build. Check the source and destination, then try again."), isError: true);
+            SetStatus(GetUserMessage(exception, "Voice Bridge couldn't complete the build. Check the source and destination, then try again."), isError: true);
             await LoadCompletedImportIfAvailableAsync(databasePath);
         }
         finally
@@ -318,7 +317,7 @@ public sealed partial class MainWindow : Window
         catch (Exception exception)
         {
             _exportIssues.Add(CreateOperationIssue("CSV export stopped", exception));
-            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't create the CSV export."), isError: true);
+            SetStatus(GetUserMessage(exception, "Voice Bridge couldn't create the CSV export."), isError: true);
         }
         finally
         {
@@ -407,7 +406,7 @@ public sealed partial class MainWindow : Window
         if (_sourcePath is null)
         {
             OverviewTitleText.Text = "Open your Google Voice Takeout";
-            OverviewSubtitleText.Text = "Select the original ZIP or extracted folder. VoiceBridge will inspect it without modifying it.";
+            OverviewSubtitleText.Text = "Select the original ZIP or extracted folder. Voice Bridge will inspect it without modifying it.";
             OverviewSourcePathText.Text = "No archive selected";
             OverviewSourceSummaryText.Text = "Choose a Google Voice Takeout ZIP or extracted folder to inspect it locally.";
             ToolTipService.SetToolTip(OverviewSourcePathText, "No archive selected");
@@ -726,7 +725,7 @@ public sealed partial class MainWindow : Window
             {
                 BrowserDetailPanel.Visibility = Visibility.Visible;
                 BrowserDetailTitleText.Text = "Records could not be loaded";
-                BrowserDetailSummaryText.Text = GetUserMessage(exception, "VoiceBridge couldn't read this page from the local archive.");
+                BrowserDetailSummaryText.Text = GetUserMessage(exception, "Voice Bridge couldn't read this page from the local archive.");
             }
         }
         finally
@@ -1004,7 +1003,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            SetStatus(GetUserMessage(exception, "VoiceBridge couldn't load more messages for this conversation."), isError: true);
+            SetStatus(GetUserMessage(exception, "Voice Bridge couldn't load more messages for this conversation."), isError: true);
         }
         finally
         {
@@ -1415,7 +1414,7 @@ public sealed partial class MainWindow : Window
     {
         var dialog = new ContentDialog
         {
-            Title = "VoiceBridge",
+            Title = "Voice Bridge",
             Content = message,
             CloseButtonText = "Close",
             XamlRoot = RootGrid.XamlRoot
@@ -1427,24 +1426,24 @@ public sealed partial class MainWindow : Window
     {
         var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
         var about = new StackPanel { Spacing = 10 };
-        about.Children.Add(new TextBlock { Text = $"VoiceBridge {version}", FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        about.Children.Add(new TextBlock { Text = $"Voice Bridge {version}", FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         about.Children.Add(new TextBlock { Text = "Built by 404 Builds.", TextWrapping = TextWrapping.Wrap });
-        about.Children.Add(new TextBlock { Text = "VoiceBridge reads the Google Voice Takeout you select and creates a local database, import report, and offline HTML archive in the destination you choose.", TextWrapping = TextWrapping.Wrap });
-        about.Children.Add(new TextBlock { Text = "No account is required. VoiceBridge does not add telemetry or upload your Takeout.", TextWrapping = TextWrapping.Wrap });
-        await ShowDialogAsync("About VoiceBridge", about);
+        about.Children.Add(new TextBlock { Text = "Voice Bridge reads the Google Voice Takeout you select and creates a local database, import report, and offline HTML archive in the destination you choose.", TextWrapping = TextWrapping.Wrap });
+        about.Children.Add(new TextBlock { Text = "No account is required. Voice Bridge does not add telemetry or upload your Takeout.", TextWrapping = TextWrapping.Wrap });
+        await ShowDialogAsync("About Voice Bridge", about);
     }
 
     private async void Privacy_Click(object sender, RoutedEventArgs e)
     {
         var privacy = new TextBlock
         {
-            Text = "VoiceBridge processes the source you select on this PC. It does not use accounts, cloud processing, or telemetry. Your Takeout ZIP or extracted source is read without being changed. The database, import report, and offline archive are written only to the destination folder you choose.\n\n"
-                + "If VoiceBridge encounters an unhandled application failure after you choose a safe output folder, it may save a local crash log there. The log can contain exception details and local file paths. It is never sent automatically; review it before choosing to share it. No crash log is created before a safe output folder is selected.\n\n"
-                + "Removing the VoiceBridge application folder does not delete your selected output folder or crash logs. You control those files.",
+            Text = "Voice Bridge processes the source you select on this PC. It does not use accounts, cloud processing, or telemetry. Your Takeout ZIP or extracted source is read without being changed. The database, import report, and offline archive are written only to the destination folder you choose.\n\n"
+                + "If Voice Bridge encounters an unhandled application failure after you choose a safe output folder, it may save a local crash log there. The log can contain exception details and local file paths. It is never sent automatically; review it before choosing to share it. No crash log is created before a safe output folder is selected.\n\n"
+                + "Removing the Voice Bridge application folder does not delete your selected output folder or crash logs. You control those files.",
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true
         };
-        await ShowDialogAsync("VoiceBridge privacy", new ScrollViewer { MaxHeight = 480, Content = privacy });
+        await ShowDialogAsync("Voice Bridge privacy", new ScrollViewer { MaxHeight = 480, Content = privacy });
     }
 
     private async Task ShowDialogAsync(string title, object content)
@@ -1480,7 +1479,7 @@ public sealed partial class MainWindow : Window
 
     private static string GetUserMessage(Exception exception, string fallback) => exception switch
     {
-        UnauthorizedAccessException => "VoiceBridge doesn't have permission to read the source or write to the destination. Choose locations you can access.",
+        UnauthorizedAccessException => "Voice Bridge doesn't have permission to read the source or write to the destination. Choose locations you can access.",
         PathTooLongException => "The selected source or destination path is too long. Choose a shorter path and try again.",
         DirectoryNotFoundException => "A selected folder is no longer available. Choose the source and destination again, then retry.",
         FileNotFoundException => "A selected file is no longer available. Choose the source again, then retry.",

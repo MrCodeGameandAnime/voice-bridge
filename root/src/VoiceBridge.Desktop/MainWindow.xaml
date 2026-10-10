@@ -2,7 +2,7 @@
     x:Class="VoiceBridge.Desktop.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="VoiceBridge">
+    Title="Voice Bridge">
     <NavigationView
         x:Name="WorkspaceNavigation"
         PaneDisplayMode="Left"
@@ -41,13 +41,7 @@
         </NavigationView.Resources>
         <NavigationView.PaneHeader>
             <StackPanel Padding="18,18,18,10" Spacing="14">
-                <Grid ColumnDefinitions="48,*" ColumnSpacing="12">
-                    <Image Source="ms-appx:///Assets/Square150x150Logo.png" Width="44" Height="44" VerticalAlignment="Center" AutomationProperties.Name="VoiceBridge icon" />
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="VoiceBridge" FontSize="20" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                        <TextBlock Text="Google Voice" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
-                </Grid>
+                <TextBlock Text="Voice" FontSize="32" FontWeight="SemiBold" MinHeight="44" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
                 <StackPanel Spacing="5">
                     <TextBlock Text="SOURCE" FontSize="12" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -108,9 +102,8 @@
 
         <NavigationView.PaneFooter>
             <StackPanel Padding="8,4,8,12" Spacing="4">
-                <Button x:Name="PrivacyButton" Content="Privacy" HorizontalAlignment="Stretch" Click="Privacy_Click" AutomationProperties.Name="Read the VoiceBridge privacy statement" />
-                <Button x:Name="AboutButton" Content="About" HorizontalAlignment="Stretch" Click="About_Click" AutomationProperties.Name="About VoiceBridge" />
-                <TextBlock x:Name="VersionAttributionText" Margin="12,5,12,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="404 Builds · VoiceBridge" TextWrapping="Wrap" />
+                <Button x:Name="PrivacyButton" Content="Privacy" HorizontalAlignment="Stretch" Click="Privacy_Click" AutomationProperties.Name="Read the Voice Bridge privacy statement" />
+                <Button x:Name="AboutButton" Content="About" HorizontalAlignment="Stretch" Click="About_Click" AutomationProperties.Name="About Voice Bridge" />
             </StackPanel>
         </NavigationView.PaneFooter>
 
@@ -120,7 +113,7 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
                         <TextBlock x:Name="StatusText" Text="Open a Google Voice Takeout to begin." Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <ProgressBar x:Name="OperationProgressBar" Width="150" Height="8" IsIndeterminate="True" Visibility="Collapsed" AutomationProperties.Name="VoiceBridge operation progress" />
+                            <ProgressBar x:Name="OperationProgressBar" Width="150" Height="8" IsIndeterminate="True" Visibility="Collapsed" AutomationProperties.Name="Voice Bridge operation progress" />
                             <Button x:Name="CancelButton" Content="Cancel" Visibility="Collapsed" Click="Cancel_Click" />
                         </StackPanel>
                     </Grid>
@@ -132,7 +125,7 @@
                             <StackPanel MaxWidth="1100" HorizontalAlignment="Left" Spacing="18">
                                 <StackPanel Spacing="5">
                                     <TextBlock x:Name="OverviewTitleText" Text="Open your Google Voice Takeout" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextWrapping="Wrap" />
-                                    <TextBlock x:Name="OverviewSubtitleText" Text="Select the original ZIP or extracted folder. VoiceBridge will inspect it without modifying it." FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="OverviewSubtitleText" Text="Select the original ZIP or extracted folder. Voice Bridge will inspect it without modifying it." FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
 
                                 <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
@@ -231,7 +224,7 @@
                             <StackPanel MaxWidth="1000" HorizontalAlignment="Left" Spacing="18">
                                 <StackPanel Spacing="5">
                                     <TextBlock Text="Export" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                                    <TextBlock Text="Choose where VoiceBridge should create its local database, import report, and offline archive." FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock Text="Choose where Voice Bridge should create its local database, import report, and offline archive." FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <Border Padding="20" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
                                     <StackPanel Spacing="12">
